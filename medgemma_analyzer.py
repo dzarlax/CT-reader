@@ -42,6 +42,7 @@ class MedGemmaAnalyzer:
             self.device = self._get_device()
             self.processor = None
             self.model = None
+            self.token = None
             self._load_model()
             show_success("MedGemma анализатор инициализирован")
             
@@ -98,13 +99,59 @@ class MedGemmaAnalyzer:
         else:
             return "cpu"
     
+    def _setup_huggingface_token(self):
+        """Setup Hugging Face token"""
+        from dotenv import load_dotenv
+        from huggingface_hub import login
+        load_dotenv()
+        
+        self.token = os.getenv("HUGGINGFACE_TOKEN")
+        if self.token:
+            show_success("✅ Токен Hugging Face найден в .env файле")
+            log_to_file("Hugging Face token found in .env file")
+            show_info(f"🔑 Токен начинается с: {self.token[:10]}...")
+            log_to_file(f"Token starts with: {self.token[:10]}...")
+            
+            # Явная аутентификация в HuggingFace Hub
+            try:
+                login(token=self.token, add_to_git_credential=False)
+                show_success("✅ Аутентификация в HuggingFace Hub успешна")
+                log_to_file("HuggingFace Hub authentication successful")
+            except Exception as e:
+                show_error(f"❌ Ошибка аутентификации в HuggingFace Hub: {e}")
+                log_to_file(f"HuggingFace Hub authentication error: {e}", "ERROR")
+                raise
+        else:
+            show_error("❌ Токен Hugging Face не найден в .env файле!")
+            show_info("💡 Добавьте HUGGINGFACE_TOKEN=your_token в .env файл")
+            log_to_file("Hugging Face token not found in .env file", "ERROR")
+            raise ValueError("Токен Hugging Face обязателен для работы с MedGemma")
+    
     def _load_model(self):
         """Load the MedGemma model and processor"""
         try:
             show_step("Загрузка модели MedGemma")
-            self.processor = AutoProcessor.from_pretrained(self.model_name)
-            self.model = AutoModelForImageTextToText.from_pretrained(self.model_name)
-            self.model.to(self.device)
+            
+            # Setup HuggingFace token
+            self._setup_huggingface_token()
+            
+            # Load processor and model with token
+            self.processor = AutoProcessor.from_pretrained(
+                self.model_name,
+                token=self.token,
+                trust_remote_code=True
+            )
+            self.model = AutoModelForImageTextToText.from_pretrained(
+                self.model_name,
+                token=self.token,
+                torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32,
+                device_map="auto" if self.device != "cpu" else None,
+                trust_remote_code=True
+            )
+            
+            if self.device == "cpu":
+                self.model.to(self.device)
+            
             show_success("Модель MedGemma загружена")
         except Exception as e:
             show_error(f"Ошибка загрузки модели MedGemma: {e}")
