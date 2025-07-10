@@ -98,6 +98,7 @@ class MedGemmaClient:
     def _setup_huggingface_token(self):
         """Setup Hugging Face token"""
         from dotenv import load_dotenv
+        from huggingface_hub import login
         load_dotenv()
         
         self.token = os.getenv("HUGGINGFACE_TOKEN")
@@ -106,6 +107,16 @@ class MedGemmaClient:
             log_to_file("Hugging Face token found in .env file")
             show_info(f"🔑 Токен начинается с: {self.token[:10]}...")
             log_to_file(f"Token starts with: {self.token[:10]}...")
+            
+            # Явная аутентификация в HuggingFace Hub
+            try:
+                login(token=self.token, add_to_git_credential=False)
+                show_success("✅ Аутентификация в HuggingFace Hub успешна")
+                log_to_file("HuggingFace Hub authentication successful")
+            except Exception as e:
+                show_error(f"❌ Ошибка аутентификации в HuggingFace Hub: {e}")
+                log_to_file(f"HuggingFace Hub authentication error: {e}", "ERROR")
+                raise
         else:
             show_error("❌ Токен Hugging Face не найден в .env файле!")
             show_info("💡 Добавьте HUGGINGFACE_TOKEN=your_token в .env файл")
