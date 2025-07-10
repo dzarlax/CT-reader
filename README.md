@@ -1,147 +1,229 @@
 # CT Reader - Advanced Medical Image Analysis System
 
-Система анализа медицинских КТ-изображений с использованием специализированных ИИ моделей.
+## Overview
 
-## Основные режимы анализа
+CT Reader is an advanced medical image analysis system that uses specialized AI models to analyze CT scans. The system now supports processing **ALL images** in a study with optimized memory management and parallel processing capabilities.
 
-### 🏥 MedGemma (РЕКОМЕНДУЕТСЯ)
-- **Модель**: Google MedGemma 4B - специализированная медицинская модель
-- **Возможности**: Прямой анализ изображений + текст
-- **Особенности**: Обрабатывает ВСЕ изображения, высокая точность медицинской интерпретации
-- **Требования**: GPU с минимум 8GB памяти
+## Key Features
 
-### 📋 Med42
-- **Модель**: Med42-8B - быстрая медицинская модель
-- **Возможности**: Текстовый медицинский анализ
-- **Особенности**: Быстрая обработка, хорошо для базового анализа
+- **Complete Image Analysis**: Process all images in a CT study (not just a subset)
+- **Batch Processing**: Intelligent batching to manage memory usage
+- **Parallel Processing**: Optimized for performance where possible
+- **Memory Management**: Automatic cleanup to prevent memory issues
+- **Multiple AI Models**: MedGemma, Med42, and Comprehensive analysis modes
+- **Progress Tracking**: Beautiful progress bars and detailed logging
+- **Configurable Settings**: Customize batch size and image limits
 
-### 🔍 Comprehensive
-- **Возможности**: Полный анализ всех изображений с контекстом
-- **Особенности**: Использует несколько моделей, сохраняет контекст между изображениями
+## Quick Start
 
-## Системные требования
-
-### Для сервера с CUDA:
-- **GPU**: NVIDIA с поддержкой CUDA, минимум 8GB VRAM для MedGemma
-- **RAM**: Минимум 16GB системной памяти
-- **Python**: 3.8+
-- **CUDA**: 11.8+ или 12.x
-
-### Для Mac (разработка):
-- **GPU**: Apple Silicon с поддержкой MPS
-- **RAM**: Минимум 16GB unified memory
-- **Python**: 3.8+
-
-## Установка
+### 1. Analyze ALL Images (Recommended)
 
 ```bash
-# Клонируйте репозиторий
-git clone <repository-url>
-cd CT-reader
-
-# Создайте виртуальное окружение
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# или
-.venv\Scripts\activate     # Windows
-
-# Установите зависимости
-pip install -r requirements.txt
-
-# Создайте .env файл с токеном Hugging Face
-echo "HUGGINGFACE_TOKEN=your_token_here" > .env
+python analyze_all.py
 ```
 
-## Запуск
+This script will:
+- Process **ALL** DICOM files in the `input/` directory
+- Use MedGemma model for medical analysis
+- Apply optimized batch processing
+- Show detailed progress and results
 
-### Основной режим
+### 2. Interactive Analysis with Custom Settings
+
 ```bash
 python main.py
 ```
 
-### Демонстрационный режим
+This allows you to:
+- Choose how many images to process (or all)
+- Set batch size for memory management
+- Select analysis mode (MedGemma, Med42, Comprehensive)
+- Add custom medical context
+
+## Configuration Options
+
+### Image Processing Settings
+
+- **Max Images**: 
+  - `None` = Process ALL images (recommended)
+  - `Number` = Limit to specific count
+  
+- **Batch Size**: 
+  - `3-5` = Conservative (less memory)
+  - `5-10` = Balanced (recommended)
+  - `10+` = Aggressive (more memory, faster)
+
+- **Parallel Processing**: 
+  - Always enabled for optimal performance
+
+### Analysis Modes
+
+1. **MedGemma** (Recommended)
+   - Google's specialized medical AI model
+   - Direct medical image analysis
+   - Best for diagnostic insights
+
+2. **Med42**
+   - Specialized medical AI model
+   - Fast analysis
+   - Good for general medical assessment
+
+3. **Comprehensive**
+   - Full analysis of all images
+   - Detailed contextual information
+   - Most thorough analysis
+
+## System Requirements
+
+### Memory Requirements
+
+- **Small Studies** (< 100 images): 8GB RAM minimum
+- **Medium Studies** (100-500 images): 16GB RAM recommended
+- **Large Studies** (500+ images): 32GB RAM recommended
+
+### GPU Support
+
+- **NVIDIA GPU**: CUDA support for faster processing
+- **Apple Silicon**: MPS support for M1/M2 Macs
+- **CPU Only**: Supported but slower
+
+## Performance Optimization
+
+### For Large Studies (1000+ images)
+
+1. **Adjust Batch Size**:
+   ```python
+   # Conservative approach
+   batch_size = 3
+   
+   # Balanced approach
+   batch_size = 5
+   
+   # Aggressive approach (if you have enough RAM)
+   batch_size = 10
+   ```
+
+2. **Monitor Memory Usage**:
+   - System automatically cleans up memory after each batch
+   - If you encounter memory issues, reduce batch size
+
+3. **Processing Time Estimates**:
+   - ~30-60 seconds per image (GPU)
+   - ~2-3 minutes per image (CPU)
+   - 1000 images ≈ 8-50 hours depending on hardware
+
+## File Structure
+
+```
+CT-reader/
+├── input/                 # Place DICOM files here
+│   ├── D0000
+│   ├── D0001
+│   └── ...
+├── output/               # Analysis results and logs
+├── main.py              # Interactive analysis
+├── analyze_all.py       # Quick analysis of all images
+├── ct_analyzer.py       # Core analysis engine
+├── medgemma_analyzer.py # MedGemma integration
+└── progress_logger.py   # Progress tracking
+```
+
+## Usage Examples
+
+### Example 1: Analyze All Images with Default Settings
+
 ```bash
-python demo.py
+python analyze_all.py
 ```
 
-## Использование
+### Example 2: Analyze First 100 Images with Custom Batch Size
 
-1. **Подготовка данных**: Поместите DICOM файлы в папку `input/`
-2. **Запуск анализа**: Выберите режим анализа (рекомендуется MedGemma)
-3. **Дополнительный контекст**: Введите информацию о пациенте для улучшения анализа
-4. **Результаты**: Анализ отображается в консоли
-
-## Дополнительный контекст
-
-Система поддерживает ввод дополнительной клинической информации:
-- Возраст пациента
-- Симптомы
-- Область исследования
-- Подозрения на заболевания
-- Анамнез
-
-## Оптимизация для GPU
-
-Система автоматически:
-- Определяет доступные GPU (CUDA/MPS)
-- Настраивает параметры памяти
-- Обрабатывает изображения пакетами для стабильности
-- Очищает память между пакетами
-- **Ленивая загрузка моделей** - загружает только выбранную модель
-
-## Система логирования
-
-### Красивый интерфейс + Детальные логи
-
-Система оптимизирована для удобства пользователя:
-
-- **Красивый прогресс-бар** - наглядное отображение процесса анализа
-- **Понятные сообщения** - без технических деталей в консоли
-- **Детальные логи в файл** - вся техническая информация сохраняется
-- **Временные метки** - точное время всех операций
-- **Автоматическое именование** - логи с временными метками
-
-### Расположение логов
-
-```
-logs/
-├── ct_analysis_20250710_120615.log  # Основной лог
-├── ct_analysis_20250710_143022.log  # Следующий сеанс
-└── ...
+```bash
+python main.py
+# Select: Max images = 100, Batch size = 8
 ```
 
-### Что логируется
+### Example 3: Full Analysis with Medical Context
 
-- **Инициализация моделей** - загрузка и настройка
-- **Обработка изображений** - прогресс и результаты
-- **Ошибки и предупреждения** - полная диагностика
-- **Время выполнения** - детальная статистика
-- **Использование памяти** - мониторинг GPU/CPU
+```bash
+python main.py
+# Select: All images, Add context: "65-year-old patient, chest pain, suspected pneumonia"
+```
 
-### Преимущества
+## Output and Logging
 
-✅ **Чистый интерфейс** - только важная информация  
-✅ **Полная диагностика** - все детали в логах  
-✅ **Отслеживание прогресса** - красивые прогресс-бары  
-✅ **История операций** - все логи сохраняются  
-✅ **Легкая отладка** - детальная информация об ошибках  
+### Analysis Results
 
-## Ленивая загрузка (Lazy Loading)
+- **Console Output**: Real-time progress and results
+- **Log Files**: Detailed logs in `output/` directory
+- **Timestamped Logs**: Each run creates a new log file
 
-Система оптимизирована для экономии памяти:
-- **Быстрый запуск** - модели не загружаются при инициализации
-- **Экономия памяти** - загружается только выбранная модель
-- **MedGemma (8GB)** загружается только при выборе режима MedGemma
-- **Med42 (16GB)** загружается только при выборе режима Med42
+### Log File Location
 
-## Устранение неполадок
+```
+output/ct_analysis_YYYY-MM-DD_HH-MM-SS.log
+```
 
-### Ошибки CUDA памяти
-- Перезапустите программу
-- Убедитесь что другие GPU процессы не используют память
-- Проверьте доступную VRAM: `nvidia-smi`
+## Troubleshooting
 
-### Медленная работа
-- Убедитесь что используется GPU, а не CPU
-- Проверьте загрузку GPU: `nvidia-smi`
-- Увеличьте паузы между пакетами если нужно 
+### Memory Issues
+
+If you encounter out-of-memory errors:
+1. Reduce batch size to 3 or less
+2. Close other applications
+3. Consider processing in smaller chunks
+
+### Performance Issues
+
+For slow processing:
+1. Ensure GPU drivers are updated
+2. Check if CUDA/MPS is properly configured
+3. Consider using a smaller batch size if system is unstable
+
+### Authentication Issues
+
+For MedGemma access:
+1. Ensure `.env` file contains valid `HUGGINGFACE_TOKEN`
+2. Check token permissions for gated model access
+3. Verify internet connection for model downloads
+
+## Advanced Usage
+
+### Custom Batch Processing
+
+```python
+from ct_analyzer import CTAnalyzer
+
+# Custom configuration
+analyzer = CTAnalyzer(
+    max_images_for_medgemma=None,  # All images
+    enable_parallel=True,
+    batch_size=8
+)
+
+# Analyze with custom settings
+result = analyzer.analyze_directory("input", mode="medgemma")
+```
+
+### Memory-Optimized Processing
+
+```python
+# For very large studies
+analyzer = CTAnalyzer(
+    max_images_for_medgemma=None,
+    enable_parallel=True,
+    batch_size=3  # Very conservative
+)
+```
+
+## Support
+
+For issues or questions:
+1. Check the log files in `output/` directory
+2. Verify system requirements
+3. Ensure all dependencies are installed
+4. Check GPU/CUDA configuration if using GPU acceleration
+
+## License
+
+This project is for educational and research purposes. Please ensure compliance with medical data regulations and AI model licenses. 

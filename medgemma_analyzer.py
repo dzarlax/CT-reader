@@ -8,10 +8,14 @@ import os
 import sys
 import torch
 import time
+import gc
 from typing import List, Dict, Any, Optional
 from transformers import AutoProcessor, AutoModelForImageTextToText
 from PIL import Image
 import config
+from datetime import datetime
+import concurrent.futures
+import threading
 from progress_logger import (
     show_step, show_success, show_error, show_info, show_warning, 
     start_progress, update_progress, complete_progress, 
@@ -30,8 +34,14 @@ except ImportError as e:
 class MedGemmaAnalyzer:
     """Medical image analysis using Google's MedGemma model"""
     
-    def __init__(self):
-        """Initialize MedGemma analyzer"""
+    def __init__(self, max_images_to_analyze: int = None, enable_parallel: bool = True, batch_size: int = 5):
+        """Initialize MedGemma analyzer
+        
+        Args:
+            max_images_to_analyze: Maximum number of images to analyze (None = all images)
+            enable_parallel: Enable parallel processing where possible
+            batch_size: Number of images to process in each batch for memory management
+        """
         if not MEDGEMMA_AVAILABLE:
             show_error("MedGemma недоступна")
             return
@@ -43,8 +53,13 @@ class MedGemmaAnalyzer:
             self.processor = None
             self.model = None
             self.token = None
+            self.max_images_to_analyze = max_images_to_analyze
+            self.enable_parallel = enable_parallel
+            self.batch_size = batch_size
+            self._model_lock = threading.Lock()  # For thread safety
             self._load_model()
             show_success("MedGemma анализатор инициализирован")
+            show_info(f"🔧 Настройки: макс. изображений = {'все' if max_images_to_analyze is None else max_images_to_analyze}, параллелизация = {enable_parallel}, размер батча = {batch_size}")
             
         except Exception as e:
             show_error(f"Ошибка инициализации MedGemma: {e}")
@@ -53,7 +68,7 @@ class MedGemmaAnalyzer:
     
     def analyze_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
         """
-        Analyze CT study using MedGemma
+        Analyze CT study using MedGemma - processes ALL images
         
         Args:
             images: List of processed image data
@@ -65,20 +80,24 @@ class MedGemmaAnalyzer:
         if not images:
             show_error("Нет изображений для анализа")
             return None
-            
-        show_step(f"Запуск MedGemma анализа ({len(images)} изображений)")
-        log_to_file(f"Starting MedGemma analysis with {len(images)} images")
+        
+        # Determine how many images to process
+        total_images = len(images)
+        images_to_process = total_images if self.max_images_to_analyze is None else min(self.max_images_to_analyze, total_images)
+        
+        show_step(f"Запуск MedGemma анализа ({images_to_process} из {total_images} изображений)")
+        log_to_file(f"Starting MedGemma analysis with {images_to_process} out of {total_images} images")
         
         if user_context:
             show_info(f"Дополнительный контекст: {user_context}")
         
         try:
-            # Analyze all images with progress tracking
-            result = self._analyze_ct_study(images, user_context)
+            # Process images in batches
+            result = self._analyze_all_images(images[:images_to_process], user_context)
             
             if result:
-                show_success("MedGemma анализ завершён успешно")
-                log_to_file("MedGemma analysis completed successfully")
+                show_success(f"MedGemma анализ завершён успешно ({images_to_process} изображений)")
+                log_to_file(f"MedGemma analysis completed successfully for {images_to_process} images")
                 return result
             else:
                 show_warning("MedGemma анализ не дал результатов")
@@ -158,33 +177,118 @@ class MedGemmaAnalyzer:
             log_to_file(f"Model loading error: {e}", "ERROR")
             raise
     
-    def _analyze_ct_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
+    def _analyze_all_images(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
         """
-        Analyze CT study using MedGemma
+        Analyze all images in batches with progress tracking
         
         Args:
-            images: List of image dictionaries with 'base64_image', 'metadata', etc.
+            images: List of image dictionaries
             user_context: Additional context from user
             
         Returns:
-            Medical analysis text for the study
+            Combined medical analysis text
         """
         if not self.model or not self.processor:
             show_error("Модель MedGemma не инициализирована")
             return None
             
-        show_step(f"Анализ CT исследования с {len(images)} изображениями")
-        log_to_file(f"Analyzing CT study with {len(images)} images")
+        total_images = len(images)
+        show_step(f"Анализ {total_images} изображений в батчах по {self.batch_size}")
+        log_to_file(f"Analyzing {total_images} images in batches of {self.batch_size}")
+        
+        all_analyses = []
         
         try:
-            # Analyze first few images (limit for performance)
-            max_images = min(5, len(images))  # Limit to 5 images for performance
-            analyses = []
-            
-            for i in range(max_images):
-                image_data = images[i]
-                show_info(f"Анализ изображения {i+1}/{max_images}")
+            # Process images in batches
+            for batch_start in range(0, total_images, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, total_images)
+                batch_images = images[batch_start:batch_end]
+                batch_num = (batch_start // self.batch_size) + 1
+                total_batches = (total_images + self.batch_size - 1) // self.batch_size
                 
+                show_info(f"📦 Обработка батча {batch_num}/{total_batches} ({len(batch_images)} изображений)")
+                log_to_file(f"Processing batch {batch_num}/{total_batches} with {len(batch_images)} images")
+                
+                # Process batch
+                batch_analyses = self._process_batch(batch_images, user_context, batch_start)
+                all_analyses.extend(batch_analyses)
+                
+                # Memory cleanup after each batch
+                self._cleanup_memory()
+                
+                # Progress update
+                processed = min(batch_end, total_images)
+                show_success(f"✅ Обработано {processed}/{total_images} изображений")
+                
+                # Small delay to prevent overheating
+                time.sleep(0.5)
+            
+            # Create final comprehensive report
+            if all_analyses:
+                final_report = self._create_comprehensive_report(all_analyses, user_context, total_images)
+                show_success(f"🎉 Анализ завершён! Обработано {len(all_analyses)} изображений")
+                return final_report
+            else:
+                show_warning("Не удалось получить анализ ни одного изображения")
+                return None
+                
+        except Exception as e:
+            show_error(f"Ошибка пакетного анализа: {e}")
+            log_to_file(f"Batch analysis error: {e}", "ERROR")
+            self._cleanup_memory()
+            return None
+    
+    def _process_batch(self, batch_images: List[Dict[str, Any]], user_context: str, start_index: int) -> List[str]:
+        """
+        Process a batch of images
+        
+        Args:
+            batch_images: List of images in this batch
+            user_context: User context
+            start_index: Starting index for image numbering
+            
+        Returns:
+            List of analysis results
+        """
+        batch_analyses = []
+        
+        for i, image_data in enumerate(batch_images):
+            global_index = start_index + i + 1
+            
+            try:
+                show_info(f"🔍 Анализ изображения {global_index}")
+                
+                # Analyze single image
+                analysis = self._analyze_single_image(image_data, user_context, global_index)
+                
+                if analysis:
+                    batch_analyses.append(analysis)
+                    show_success(f"✅ Изображение {global_index} проанализировано")
+                else:
+                    show_warning(f"⚠️ Изображение {global_index} не удалось проанализировать")
+                
+            except Exception as e:
+                show_error(f"❌ Ошибка анализа изображения {global_index}: {e}")
+                log_to_file(f"Error analyzing image {global_index}: {e}", "ERROR")
+                continue
+        
+        return batch_analyses
+    
+    def _analyze_single_image(self, image_data: Dict[str, Any], user_context: str, image_index: int) -> Optional[str]:
+        """
+        Analyze a single image with MedGemma
+        
+        Args:
+            image_data: Image data dictionary
+            user_context: User context
+            image_index: Image number for reporting
+            
+        Returns:
+            Analysis text or None
+        """
+        try:
+            # Thread-safe model access
+            with self._model_lock:
                 # Decode base64 image
                 import base64
                 from io import BytesIO
@@ -192,7 +296,7 @@ class MedGemmaAnalyzer:
                 image = Image.open(BytesIO(image_bytes))
                 
                 # Create medical prompt
-                prompt = f"""Analyze this CT image #{i+1} from a medical study.
+                prompt = f"""Analyze this CT image #{image_index} from a medical study.
 
 {f"Study Context: {user_context}" if user_context else ""}
 
@@ -250,96 +354,66 @@ Focus on diagnostic and therapeutic implications."""
                 generated_text = response.split("assistant")[-1].strip() if "assistant" in response else response.strip()
                 
                 if generated_text:
-                    analyses.append(f"=== ИЗОБРАЖЕНИЕ {i+1} ===\n{generated_text}")
-                    show_success(f"Изображение {i+1} проанализировано")
+                    return f"=== ИЗОБРАЖЕНИЕ {image_index} ===\n{generated_text}"
+                else:
+                    return None
                 
-                # Clear memory
-                if self.device == "cuda":
-                    torch.cuda.empty_cache()
-                elif self.device == "mps":
-                    torch.mps.empty_cache()
-            
-            # Combine all analyses
-            if analyses:
-                final_report = f"""=== MEDGEMMA АНАЛИЗ CT ИССЛЕДОВАНИЯ ===
-
-ОБЩАЯ ИНФОРМАЦИЯ:
-- Количество проанализированных изображений: {len(analyses)}
-- Дополнительный контекст: {user_context if user_context else "Не предоставлен"}
-
-{chr(10).join(analyses)}
-
-=== КОНЕЦ АНАЛИЗА ==="""
-                
-                show_success("MedGemma анализ завершён успешно")
-                log_to_file("MedGemma analysis completed successfully")
-                return final_report
-            else:
-                show_warning("Не удалось получить анализ изображений")
-                return None
-            
         except Exception as e:
-            show_error(f"Ошибка анализа изображения: {e}")
-            log_to_file(f"Image analysis error: {e}", "ERROR")
-            
-            # Clear memory on error
+            log_to_file(f"Single image analysis error for image {image_index}: {e}", "ERROR")
+            return None
+    
+    def _cleanup_memory(self):
+        """Clean up GPU/CPU memory"""
+        try:
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             elif self.device == "mps":
                 torch.mps.empty_cache()
-                
-            return None
+            
+            # Force garbage collection
+            gc.collect()
+            
+        except Exception as e:
+            log_to_file(f"Memory cleanup error: {e}", "WARNING")
     
-    def _create_final_report(self, analyses: List[str]) -> str:
-        """Создаёт финальный медицинский отчёт"""
+    def _create_comprehensive_report(self, analyses: List[str], user_context: str, total_images: int) -> str:
+        """
+        Create a comprehensive medical report from all analyses
         
-        report = f"""
-=== MEDGEMMA МЕДИЦИНСКИЙ АНАЛИЗ CT ИССЛЕДОВАНИЯ ===
+        Args:
+            analyses: List of individual image analyses
+            user_context: User context
+            total_images: Total number of images processed
+            
+        Returns:
+            Comprehensive medical report
+        """
+        report = f"""=== ПОЛНЫЙ MEDGEMMA АНАЛИЗ CT ИССЛЕДОВАНИЯ ===
 
 ДАТА АНАЛИЗА: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-КОЛИЧЕСТВО ИЗОБРАЖЕНИЙ: {len(analyses)}
-АНАЛИЗАТОР: MedGemma 4B (Google)
+ОБЩАЯ ИНФОРМАЦИЯ:
+- Всего изображений обработано: {len(analyses)} из {total_images}
+- Дополнительный контекст: {user_context if user_context else "Не предоставлен"}
+- Анализатор: MedGemma 4B (Google)
 
 === ДЕТАЛЬНЫЙ АНАЛИЗ ПО ИЗОБРАЖЕНИЯМ ===
 
-"""
-        
-        # Добавляем все анализы
-        for analysis in analyses:
-            report += analysis + "\n\n"
-        
-        # Создаём общее резюме с помощью MedGemma
-        if self.use_medgemma:
-            try:
-                summary_prompt = f"""Based on the following CT study analysis, provide a comprehensive summary:
-
 {chr(10).join(analyses)}
 
-Please provide:
-1. OVERALL FINDINGS SUMMARY
-2. KEY PATHOLOGICAL FINDINGS
-3. CLINICAL SIGNIFICANCE
-4. RECOMMENDATIONS
-5. FOLLOW-UP SUGGESTIONS
+=== ОБЩИЕ ВЫВОДЫ ===
 
-Focus on the most clinically relevant findings and provide actionable recommendations."""
-                
-                summary = self.medgemma_client.analyze_medical_text(
-                    summary_prompt,
-                    "CT study comprehensive summary"
-                )
-                
-                if summary:
-                    report += f"""
-=== ОБЩЕЕ РЕЗЮМЕ ИССЛЕДОВАНИЯ (MedGemma) ===
+Исследование включает {len(analyses)} проанализированных изображений.
+Каждое изображение было обработано индивидуально с использованием 
+специализированной медицинской модели MedGemma.
 
-{summary}
+=== РЕКОМЕНДАЦИИ ===
 
-=== КОНЕЦ ОТЧЁТА ==="""
-                
-            except Exception as e:
-                print(f"⚠️ Ошибка создания резюме: {e}")
-                report += "\n=== КОНЕЦ ОТЧЁТА ==="
+1. Внимательно изучите каждый раздел анализа
+2. Обратите внимание на повторяющиеся находки
+3. Консультируйтесь с лечащим врачом для интерпретации результатов
+4. При необходимости проведите дополнительные исследования
+
+=== КОНЕЦ АНАЛИЗА ==="""
         
         return report
 

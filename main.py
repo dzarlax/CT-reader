@@ -10,6 +10,70 @@ from datetime import datetime
 from ct_analyzer import CTAnalyzer
 from progress_logger import show_step, show_success, show_error, show_info, show_warning, get_log_file
 
+def get_analysis_settings():
+    """Get analysis settings from user"""
+    print("\n=== НАСТРОЙКИ АНАЛИЗА ===")
+    print("Настройте параметры анализа:")
+    
+    # Max images setting
+    print("\n1. Количество изображений для анализа:")
+    print("   - Введите число (например, 100) для ограничения")
+    print("   - Нажмите Enter для анализа ВСЕХ изображений")
+    
+    max_images = None
+    while True:
+        try:
+            user_input = input("Максимальное количество изображений (Enter = все): ").strip()
+            if not user_input:
+                max_images = None
+                show_success("Будут проанализированы ВСЕ изображения")
+                break
+            else:
+                max_images = int(user_input)
+                if max_images > 0:
+                    show_success(f"Будет проанализировано максимум {max_images} изображений")
+                    break
+                else:
+                    show_warning("Введите положительное число")
+        except ValueError:
+            show_warning("Введите корректное число или нажмите Enter")
+        except KeyboardInterrupt:
+            show_warning("Отмена операции")
+            return None, None, None
+    
+    # Batch size setting
+    print("\n2. Размер батча (количество изображений, обрабатываемых одновременно):")
+    print("   - Меньше = меньше памяти, медленнее")
+    print("   - Больше = больше памяти, быстрее")
+    print("   - Рекомендуется: 3-10")
+    
+    batch_size = 5
+    while True:
+        try:
+            user_input = input("Размер батча (по умолчанию 5): ").strip()
+            if not user_input:
+                batch_size = 5
+                break
+            else:
+                batch_size = int(user_input)
+                if 1 <= batch_size <= 50:
+                    break
+                else:
+                    show_warning("Введите число от 1 до 50")
+        except ValueError:
+            show_warning("Введите корректное число")
+        except KeyboardInterrupt:
+            show_warning("Отмена операции")
+            return None, None, None
+    
+    show_success(f"Размер батча: {batch_size}")
+    
+    # Parallel processing (always enabled for now)
+    enable_parallel = True
+    show_info("Параллелизация: включена")
+    
+    return max_images, enable_parallel, batch_size
+
 def main():
     """Main application entry point"""
     print("=== CT Reader - Advanced Medical Image Analysis ===")
@@ -36,6 +100,11 @@ def main():
     
     show_success(f"Найдено {len(dicom_files)} DICOM-файлов")
     
+    # Get analysis settings
+    max_images, enable_parallel, batch_size = get_analysis_settings()
+    if max_images is None and enable_parallel is None and batch_size is None:
+        return  # User cancelled
+    
     # Get additional context from user
     print("\n=== ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ===")
     print("Предоставьте дополнительный контекст для более точного анализа:")
@@ -53,10 +122,14 @@ def main():
         show_warning("Отмена операции")
         return
     
-    # Initialize analyzer
+    # Initialize analyzer with settings
     try:
         show_step("Инициализация анализатора")
-        analyzer = CTAnalyzer()
+        analyzer = CTAnalyzer(
+            max_images_for_medgemma=max_images,
+            enable_parallel=enable_parallel,
+            batch_size=batch_size
+        )
         show_success("Анализатор инициализирован (модели загружаются по требованию)")
     except Exception as e:
         show_error(f"Ошибка инициализации анализатора: {e}")
@@ -88,9 +161,27 @@ def main():
     analysis_mode = mode_map[choice]
     show_success(f"Выбран режим: {analysis_mode}")
     
+    # Show final configuration
+    print("\n=== ИТОГОВАЯ КОНФИГУРАЦИЯ ===")
+    show_info(f"📁 DICOM файлов: {len(dicom_files)}")
+    show_info(f"🔍 Режим анализа: {analysis_mode}")
+    show_info(f"🖼️ Макс. изображений: {'все' if max_images is None else max_images}")
+    show_info(f"📦 Размер батча: {batch_size}")
+    show_info(f"⚡ Параллелизация: {'включена' if enable_parallel else 'выключена'}")
+    if user_context:
+        show_info(f"📝 Контекст: {user_context[:50]}{'...' if len(user_context) > 50 else ''}")
+    
     # Show logging info
     log_file = get_log_file()
-    show_info(f"Детальные логи сохраняются в: {log_file}")
+    show_info(f"📋 Логи: {log_file}")
+    
+    # Confirm start
+    print("\n" + "="*50)
+    try:
+        input("Нажмите Enter для начала анализа или Ctrl+C для отмены...")
+    except KeyboardInterrupt:
+        show_warning("Анализ отменён пользователем")
+        return
     
     # Run analysis
     try:

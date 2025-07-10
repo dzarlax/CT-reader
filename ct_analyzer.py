@@ -33,10 +33,20 @@ except ImportError:
 import config
 
 class CTAnalyzer:
-    def __init__(self, config_path: str = "config.py"):
-        """Initialize CT Analyzer with lazy loading"""
+    def __init__(self, config_path: str = "config.py", max_images_for_medgemma: int = None, enable_parallel: bool = True, batch_size: int = 5):
+        """Initialize CT Analyzer with lazy loading
+        
+        Args:
+            config_path: Path to configuration file
+            max_images_for_medgemma: Maximum number of images to analyze with MedGemma (None = all images)
+            enable_parallel: Enable parallel processing where possible
+            batch_size: Number of images to process in each batch for memory management
+        """
         self.config = Config()
         self.image_processor = ImageProcessor()
+        self.max_images_for_medgemma = max_images_for_medgemma
+        self.enable_parallel = enable_parallel
+        self.batch_size = batch_size
         
         # Lazy loading - initialize analyzers only when needed
         self._med42_client = None
@@ -45,6 +55,12 @@ class CTAnalyzer:
         
         # Initialize logging
         self.setup_logging()
+        
+        # Show configuration
+        show_info(f"🔧 Конфигурация CT Analyzer:")
+        show_info(f"   - Макс. изображений для MedGemma: {'все' if max_images_for_medgemma is None else max_images_for_medgemma}")
+        show_info(f"   - Параллелизация: {enable_parallel}")
+        show_info(f"   - Размер батча: {batch_size}")
         
     def setup_logging(self):
         """Setup logging configuration"""
@@ -85,7 +101,11 @@ class CTAnalyzer:
                 show_step("Инициализация MedGemma анализатора")
                 log_to_file("Initializing MedGemma analyzer")
                 with suppress_prints():
-                    self._medgemma_analyzer = MedGemmaAnalyzer()
+                    self._medgemma_analyzer = MedGemmaAnalyzer(
+                        max_images_to_analyze=self.max_images_for_medgemma,
+                        enable_parallel=self.enable_parallel,
+                        batch_size=self.batch_size
+                    )
                 show_success("MedGemma анализатор инициализирован")
                 log_to_file("MedGemma analyzer initialized successfully")
             else:
