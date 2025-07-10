@@ -160,51 +160,134 @@ class MedGemmaAnalyzer:
     
     def _analyze_ct_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
         """
-        Analyze a single CT image using MedGemma
+        Analyze CT study using MedGemma
         
         Args:
-            image_data: Dictionary containing 'image' (PIL Image) and 'dicom_data' (DICOM data)
+            images: List of image dictionaries with 'base64_image', 'metadata', etc.
             user_context: Additional context from user
             
         Returns:
-            Medical analysis text for the image
+            Medical analysis text for the study
         """
         if not self.model or not self.processor:
             show_error("Модель MedGemma не инициализирована")
             return None
             
-        show_step(f"Анализ изображения {images[0]['dicom_data']['SeriesInstanceUID']}")
+        show_step(f"Анализ CT исследования с {len(images)} изображениями")
+        log_to_file(f"Analyzing CT study with {len(images)} images")
         
         try:
-            # Prepare image for MedGemma
-            image_data = images[0]
-            image = Image.fromarray(image_data['image'])
+            # Analyze first few images (limit for performance)
+            max_images = min(5, len(images))  # Limit to 5 images for performance
+            analyses = []
             
-            # Process image
-            inputs = self.processor(image, return_tensors="pt").to(self.device)
+            for i in range(max_images):
+                image_data = images[i]
+                show_info(f"Анализ изображения {i+1}/{max_images}")
+                
+                # Decode base64 image
+                import base64
+                from io import BytesIO
+                image_bytes = base64.b64decode(image_data['base64_image'])
+                image = Image.open(BytesIO(image_bytes))
+                
+                # Create medical prompt
+                prompt = f"""Analyze this CT image #{i+1} from a medical study.
+
+{f"Study Context: {user_context}" if user_context else ""}
+
+Please provide:
+1. Anatomical structures visible
+2. Any pathological findings
+3. Normal findings
+4. Clinical significance
+5. Recommendations
+
+Focus on diagnostic and therapeutic implications."""
+                
+                # Prepare messages for MedGemma
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "You are an expert radiologist specializing in CT image analysis."}]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image", "image": image}
+                        ]
+                    }
+                ]
+                
+                # Process with MedGemma
+                inputs = self.processor.apply_chat_template(
+                    messages, 
+                    add_generation_prompt=True, 
+                    tokenize=True,
+                    return_dict=True, 
+                    return_tensors="pt"
+                ).to(self.model.device, dtype=torch.bfloat16 if self.device != "cpu" else torch.float32)
+                
+                # Generate analysis
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=512,
+                        do_sample=True,
+                        top_p=0.9,
+                        top_k=50,
+                        repetition_penalty=1.1,
+                        pad_token_id=self.processor.tokenizer.pad_token_id,
+                        eos_token_id=self.processor.tokenizer.eos_token_id,
+                        use_cache=True
+                    )
+                
+                # Decode response
+                response = self.processor.decode(outputs[0], skip_special_tokens=True)
+                
+                # Extract generated part (remove input prompt)
+                generated_text = response.split("assistant")[-1].strip() if "assistant" in response else response.strip()
+                
+                if generated_text:
+                    analyses.append(f"=== ИЗОБРАЖЕНИЕ {i+1} ===\n{generated_text}")
+                    show_success(f"Изображение {i+1} проанализировано")
+                
+                # Clear memory
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                elif self.device == "mps":
+                    torch.mps.empty_cache()
             
-            # Generate text using MedGemma
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=1000,
-                    num_beams=5,
-                    temperature=0.3
-                )
-            
-            # Decode the generated text
-            generated_text = self.processor.decode(outputs[0], skip_special_tokens=True)
-            
-            # Add user context to the analysis
-            if user_context:
-                generated_text += f"\n\nПредоставленный контекст: {user_context}"
-            
-            show_success(f"Анализ изображения завершён: {generated_text}")
-            return generated_text
+            # Combine all analyses
+            if analyses:
+                final_report = f"""=== MEDGEMMA АНАЛИЗ CT ИССЛЕДОВАНИЯ ===
+
+ОБЩАЯ ИНФОРМАЦИЯ:
+- Количество проанализированных изображений: {len(analyses)}
+- Дополнительный контекст: {user_context if user_context else "Не предоставлен"}
+
+{chr(10).join(analyses)}
+
+=== КОНЕЦ АНАЛИЗА ==="""
+                
+                show_success("MedGemma анализ завершён успешно")
+                log_to_file("MedGemma analysis completed successfully")
+                return final_report
+            else:
+                show_warning("Не удалось получить анализ изображений")
+                return None
             
         except Exception as e:
             show_error(f"Ошибка анализа изображения: {e}")
             log_to_file(f"Image analysis error: {e}", "ERROR")
+            
+            # Clear memory on error
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            elif self.device == "mps":
+                torch.mps.empty_cache()
+                
             return None
     
     def _create_final_report(self, analyses: List[str]) -> str:
