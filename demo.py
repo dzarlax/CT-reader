@@ -9,6 +9,27 @@ import sys
 from datetime import datetime
 from ct_analyzer import CTAnalyzer
 
+# =============================================================================
+# КОНФИГУРАЦИЯ ПУТЕЙ
+# =============================================================================
+
+# Путь к директории с DICOM-файлами для анализа
+# Измените этот путь для использования другой папки с изображениями
+INPUT_DIRECTORY = "input"
+
+# Альтернативные пути для разных наборов данных (раскомментируйте нужный):
+# INPUT_DIRECTORY = "input_test"        # Для тестовых данных
+# INPUT_DIRECTORY = "input_production"  # Для продакшн данных  
+# INPUT_DIRECTORY = "samples"           # Для образцов
+# INPUT_DIRECTORY = "/path/to/dicom"    # Абсолютный путь
+
+print(f"📁 Используемая директория: {INPUT_DIRECTORY}")
+print(f"📍 Полный путь: {os.path.abspath(INPUT_DIRECTORY)}")
+
+# =============================================================================
+# ФУНКЦИИ ДЕМОНСТРАЦИИ
+# =============================================================================
+
 def demo_med42_analysis():
     """Demonstrate Med42 specialized analysis"""
     print("\n=== ДЕМОНСТРАЦИЯ MED42 АНАЛИЗА ===")
@@ -18,12 +39,12 @@ def demo_med42_analysis():
         analyzer = CTAnalyzer()
         
         # Check for input data
-        if not analyzer.validate_input("input"):
-            print("Ошибка: Нет DICOM-файлов в директории 'input'")
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
             return
         
         # Run Med42 analysis
-        result = analyzer.analyze_directory("input", mode="med42")
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="med42")
         
         if result:
             print("✅ Med42 анализ завершён успешно")
@@ -44,12 +65,12 @@ def demo_hybrid_analysis():
         analyzer = CTAnalyzer()
         
         # Check for input data
-        if not analyzer.validate_input("input"):
-            print("Ошибка: Нет DICOM-файлов в директории 'input'")
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
             return
         
         # Run hybrid analysis
-        result = analyzer.analyze_directory("input", mode="hybrid")
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="hybrid")
         
         if result:
             print("✅ Гибридный анализ завершён успешно")
@@ -72,12 +93,12 @@ def demo_gemma_analysis():
         analyzer = CTAnalyzer()
         
         # Check for input data
-        if not analyzer.validate_input("input"):
-            print("Ошибка: Нет DICOM-файлов в директории 'input'")
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
             return
         
         # Run Gemma 3 analysis
-        result = analyzer.analyze_directory("input", mode="gemma")
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="gemma")
         
         if result:
             print("✅ Gemma 3 анализ завершён успешно")
@@ -105,12 +126,12 @@ def demo_intelligent_analysis():
         analyzer = CTAnalyzer()
         
         # Check for input data
-        if not analyzer.validate_input("input"):
-            print("Ошибка: Нет DICOM-файлов в директории 'input'")
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
             return
         
         # Run intelligent analysis
-        result = analyzer.analyze_directory("input", mode="intelligent")
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="intelligent")
         
         if result:
             print("✅ Интеллектуальный анализ завершён успешно")
@@ -157,12 +178,12 @@ def demo_comprehensive_analysis():
         analyzer = CTAnalyzer()
         
         # Check for input data
-        if not analyzer.validate_input("input"):
-            print("Ошибка: Нет DICOM-файлов в директории 'input'")
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
             return
         
         # Run comprehensive analysis
-        result = analyzer.analyze_directory("input", mode="comprehensive")
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="comprehensive")
         
         if result:
             print("✅ Полный анализ завершён успешно")
@@ -215,38 +236,57 @@ def compare_analysis_modes():
     
     analyzer = CTAnalyzer()
     
-    if not analyzer.validate_input("input"):
+    if not analyzer.validate_input(INPUT_DIRECTORY):
         print("Ошибка: Нет DICOM-файлов для сравнения")
         return
     
-    modes = ["med42", "hybrid", "gemma", "intelligent"]
+    # Получаем доступные режимы
+    available_modes = analyzer.get_available_modes()
+    
+    # Исключаем comprehensive режим из сравнения (слишком долгий)
+    modes = [mode for mode in available_modes if mode != "comprehensive"]
+    
+    print(f"Доступные режимы для сравнения: {', '.join(modes)}")
+    
     results = {}
     
     for mode in modes:
         print(f"\nЗапуск анализа в режиме: {mode}")
         try:
-            result = analyzer.analyze_directory("input", mode=mode)
-            results[mode] = result
-            
+            result = analyzer.analyze_directory(INPUT_DIRECTORY, mode=mode)
             if result:
-                print(f"✅ {mode.upper()} - успешно")
+                results[mode] = {
+                    'success': True,
+                    'image_count': result['image_count'],
+                    'timestamp': result['timestamp'],
+                    'summary': result.get('summary', 'Нет резюме')[:200]
+                }
+                print(f"✅ Режим {mode} завершён успешно")
             else:
-                print(f"❌ {mode.upper()} - ошибка")
-                
+                results[mode] = {'success': False, 'error': 'Нет результатов'}
+                print(f"❌ Режим {mode} завершился с ошибкой")
         except Exception as e:
-            print(f"❌ {mode.upper()} - исключение: {e}")
-            results[mode] = None
+            results[mode] = {'success': False, 'error': str(e)}
+            print(f"❌ Режим {mode} завершился с ошибкой: {e}")
     
-    # Display comparison summary
-    print("\n=== СВОДКА СРАВНЕНИЯ ===")
+    # Display comparison results
+    print("\n=== РЕЗУЛЬТАТЫ СРАВНЕНИЯ ===")
     for mode, result in results.items():
-        if result:
-            print(f"{mode.upper()}:")
-            print(f"  - Изображений: {result['image_count']}")
-            print(f"  - Время: {result['timestamp']}")
-            print(f"  - Длина анализа: {len(result['analysis'])} символов")
+        print(f"\n{mode.upper()}:")
+        if result['success']:
+            print(f"  ✅ Успешно обработано изображений: {result['image_count']}")
+            print(f"  📅 Время: {result['timestamp']}")
+            print(f"  📝 Краткое резюме: {result['summary']}...")
         else:
-            print(f"{mode.upper()}: ОШИБКА")
+            print(f"  ❌ Ошибка: {result['error']}")
+    
+    print(f"\n=== РЕКОМЕНДАЦИИ ПО РЕЖИМАМ ===")
+    print("• med42: Быстрый специализированный медицинский анализ")
+    print("• hybrid: Комбинированный анализ с визуальным описанием")
+    print("• gemma: Улучшенный выбор изображений с Gemma 3")
+    print("• medgemma: Специализированная медицинская модель Google")
+    print("• intelligent: Трёхэтапный анализ с контекстом")
+    print("• comprehensive: Полный анализ ВСЕХ изображений (не в сравнении)")
 
 def show_system_info():
     """Display system information"""
@@ -256,15 +296,15 @@ def show_system_info():
     print(f"Доступные режимы: {CTAnalyzer().get_available_modes()}")
     
     # Check input directory
-    if os.path.exists("input"):
+    if os.path.exists(INPUT_DIRECTORY):
         dicom_count = 0
-        for root, dirs, files in os.walk("input"):
+        for root, dirs, files in os.walk(INPUT_DIRECTORY):
             for file in files:
                 if file.lower().endswith(('.dcm', '.dicom')) or '.' not in file:
                     dicom_count += 1
-        print(f"DICOM-файлов в input/: {dicom_count}")
+        print(f"DICOM-файлов в {INPUT_DIRECTORY}: {dicom_count}")
     else:
-        print("Директория input/ не найдена")
+        print(f"Директория {INPUT_DIRECTORY} не найдена")
     
     # Check output directory
     if os.path.exists("output"):
@@ -272,6 +312,47 @@ def show_system_info():
         print(f"Файлов результатов в output/: {output_files}")
     else:
         print("Директория output/ не найдена")
+
+def demo_medgemma_analysis():
+    """Demonstrate MedGemma specialized medical analysis"""
+    print("\n=== ДЕМОНСТРАЦИЯ MEDGEMMA АНАЛИЗА ===")
+    print("Использует специализированную медицинскую модель Google MedGemma 4B")
+    print("Комбинирует визуальный анализ с медицинской интерпретацией")
+    
+    try:
+        analyzer = CTAnalyzer()
+        
+        # Check for input data
+        if not analyzer.validate_input(INPUT_DIRECTORY):
+            print(f"Ошибка: Нет DICOM-файлов в директории '{INPUT_DIRECTORY}'")
+            return
+        
+        # Run MedGemma analysis
+        result = analyzer.analyze_directory(INPUT_DIRECTORY, mode="medgemma")
+        
+        if result:
+            print("✅ MedGemma анализ завершён успешно")
+            print(f"Обработано изображений: {result['image_count']}")
+            print(f"Время анализа: {result['timestamp']}")
+            
+            # Show MedGemma features
+            print("\n=== ОСОБЕННОСТИ MEDGEMMA АНАЛИЗА ===")
+            print("- Специализированная медицинская модель Google")
+            print("- Двухэтапный анализ: визуальный + медицинский")
+            print("- Клинически ориентированные рекомендации")
+            print("- Дифференциальная диагностика")
+            print("- Оценка клинической значимости")
+            print("- Рекомендации по дальнейшему обследованию")
+        else:
+            print("❌ MedGemma анализ завершился с ошибкой")
+            
+    except Exception as e:
+        print(f"Ошибка демонстрации MedGemma: {e}")
+        if "MedGemma анализатор недоступен" in str(e):
+            print("💡 Убедитесь, что:")
+            print("   1. Установлен токен HUGGINGFACE_TOKEN в .env файле")
+            print("   2. У вас есть доступ к модели google/medgemma-4b-it")
+            print("   3. MedGemma клиент правильно настроен")
 
 def main():
     """Main demo function"""
@@ -288,13 +369,14 @@ def main():
         print("3. Gemma 3 анализ (улучшенный выбор изображений)")
         print("4. 🧠 Интеллектуальный анализ (трёхэтапный)")
         print("5. 🔍 Полный анализ (ВСЕ изображения с контекстом)")
-        print("6. Сравнение всех режимов")
-        print("7. 📋 Просмотр сессий полного анализа")
-        print("8. Информация о системе")
+        print("6. 🏥 MedGemma анализ (Google медицинская модель)")
+        print("7. Сравнение всех режимов")
+        print("8. 📋 Просмотр сессий полного анализа")
+        print("9. Информация о системе")
         print("0. Выход")
         
         try:
-            choice = input("\nВведите номер (0-8): ").strip()
+            choice = input("\nВведите номер (0-9): ").strip()
             
             if choice == "0":
                 print("Завершение демонстрации")
@@ -310,19 +392,22 @@ def main():
             elif choice == "5":
                 demo_comprehensive_analysis()
             elif choice == "6":
-                compare_analysis_modes()
+                demo_medgemma_analysis()
             elif choice == "7":
-                show_comprehensive_sessions()
+                compare_analysis_modes()
             elif choice == "8":
+                show_comprehensive_sessions()
+            elif choice == "9":
                 show_system_info()
             else:
-                print("Неверный выбор. Введите число от 0 до 8")
+                print("Неверный выбор, попробуйте снова")
                 
         except KeyboardInterrupt:
             print("\nЗавершение демонстрации")
             break
         except Exception as e:
             print(f"Ошибка: {e}")
+            continue
 
 if __name__ == "__main__":
     main() 

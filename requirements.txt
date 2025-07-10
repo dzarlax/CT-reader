@@ -6,3 +6,4 @@ transformers>=4.30.0
 accelerate>=0.20.0
 numpy>=1.21.0
 matplotlib>=3.5.0 
+dotenv

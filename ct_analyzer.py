@@ -14,6 +14,15 @@ from llama_med42_client import LlamaMed42Client
 from gemma_client import GemmaClient
 from intelligent_analyzer import IntelligentAnalyzer
 from comprehensive_analyzer import ComprehensiveAnalyzer
+
+# Попробуем импортировать MedGemma анализатор
+try:
+    from medgemma_analyzer import MedGemmaAnalyzer
+    MEDGEMMA_ANALYZER_AVAILABLE = True
+except ImportError as e:
+    MEDGEMMA_ANALYZER_AVAILABLE = False
+    print(f"⚠️ MedGemma анализатор недоступен: {e}")
+
 import config
 
 class CTAnalyzer:
@@ -49,6 +58,13 @@ class CTAnalyzer:
             if self.gemma_client is None:
                 self.gemma_client = GemmaClient()
             return self.gemma_client
+            
+        elif mode == "medgemma":
+            # MedGemma analyzer is always created fresh
+            if MEDGEMMA_ANALYZER_AVAILABLE:
+                return MedGemmaAnalyzer()
+            else:
+                raise ValueError("MedGemma анализатор недоступен")
             
         elif mode == "intelligent":
             if self.intelligent_analyzer is None:
@@ -190,7 +206,13 @@ class CTAnalyzer:
 
     def get_available_modes(self) -> List[str]:
         """Get list of available analysis modes"""
-        return ["med42", "hybrid", "gemma", "intelligent", "comprehensive"]
+        modes = ["med42", "hybrid", "gemma", "intelligent", "comprehensive"]
+        
+        # Добавляем MedGemma если доступна
+        if MEDGEMMA_ANALYZER_AVAILABLE:
+            modes.append("medgemma")
+            
+        return modes
     
     def validate_input(self, input_path: str) -> bool:
         """Validate that input directory contains DICOM files"""
