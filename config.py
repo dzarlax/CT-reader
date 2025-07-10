@@ -154,3 +154,16 @@ Analysis Date: {timestamp}
 
 === END REPORT ===
 """ 
+
+class Config:
+    """Simple configuration class"""
+    def __init__(self):
+        self.OLLAMA_BASE_URL = OLLAMA_BASE_URL
+        self.LLAMA_VISION_MODEL = LLAMA_VISION_MODEL
+        self.GEMMA_MODEL = GEMMA_MODEL
+        self.MED42_MODEL_PATH = MED42_MODEL_PATH
+        self.MED42_DEVICE = MED42_DEVICE
+        self.MAX_IMAGES_PER_ANALYSIS = MAX_IMAGES_PER_ANALYSIS
+        self.TOKEN_LIMIT = TOKEN_LIMIT
+        self.TARGET_SIZE = TARGET_SIZE
+        self.QUALITY = QUALITY 

@@ -232,3 +232,83 @@ Please provide comprehensive medical analysis of the available data."""
         except Exception as e:
             print(f"Ошибка генерации Med42-8B: {e}")
             return f"Error generating analysis: {str(e)}" 
+    
+    def analyze_ct_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
+        """
+        Analyze CT study with optional user context
+        
+        Args:
+            images: List of processed image data
+            user_context: Additional context from user (symptoms, age, etc.)
+            
+        Returns:
+            Medical analysis text
+        """
+        print(f"📋 Med42 анализ CT исследования ({len(images)} изображений)")
+        
+        if user_context:
+            print(f"📝 Дополнительный контекст: {user_context}")
+        
+        try:
+            # Create enhanced analysis prompt with user context
+            prompt = self._create_enhanced_analysis_prompt(images, user_context)
+            
+            # Generate analysis
+            analysis = self._generate_analysis(prompt)
+            
+            # Log the full response
+            print("=" * 50)
+            print("🔍 ПОЛНЫЙ ОТВЕТ MED42:")
+            print(analysis)
+            print("=" * 50)
+            
+            print("✅ Med42 анализ завершён")
+            return analysis
+            
+        except Exception as e:
+            print(f"❌ Ошибка Med42 анализа: {e}")
+            return None
+    
+    def _create_enhanced_analysis_prompt(self, images: List[Dict[str, Any]], user_context: str = "") -> str:
+        """Create enhanced analysis prompt with user context"""
+        # Extract metadata information
+        image_info = []
+        for i, img_data in enumerate(images):
+            metadata = img_data.get('metadata', {})
+            info = f"Image {i+1}: "
+            
+            if 'SliceLocation' in metadata:
+                info += f"Slice Location: {metadata['SliceLocation']}mm, "
+            if 'SliceThickness' in metadata:
+                info += f"Thickness: {metadata['SliceThickness']}mm, "
+            if 'SeriesDescription' in metadata:
+                info += f"Series: {metadata['SeriesDescription']}, "
+            
+            image_info.append(info.rstrip(', '))
+        
+        # Build enhanced prompt with user context
+        prompt = f"""As a medical AI specialist, analyze this CT study data:
+
+STUDY INFORMATION:
+- Total images: {len(images)}
+- Enhanced anatomical coverage with strategic selection
+- Comprehensive abdominal organ evaluation
+- Image details:
+{chr(10).join(image_info)}"""
+
+        # Add user context if provided
+        if user_context:
+            prompt += f"""
+
+ADDITIONAL CLINICAL CONTEXT:
+{user_context}
+
+Please incorporate this clinical information into your analysis."""
+
+        prompt += f"""
+
+{config.MED42_INITIAL_PROMPT}
+
+Please provide comprehensive medical analysis considering all available data and context."""
+        
+        return prompt 

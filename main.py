@@ -35,6 +35,23 @@ def main():
     
     print(f"Найдено {len(dicom_files)} DICOM-файлов")
     
+    # Get additional context from user
+    print("\n=== ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ===")
+    print("Предоставьте дополнительный контекст для более точного анализа:")
+    print("(Например: возраст пациента, симптомы, область исследования, подозрения и т.д.)")
+    print("Нажмите Enter для пропуска")
+    
+    try:
+        user_context = input("\nВведите дополнительную информацию: ").strip()
+        if user_context:
+            print(f"✅ Контекст добавлен: {user_context[:100]}{'...' if len(user_context) > 100 else ''}")
+        else:
+            user_context = ""
+            print("⚪ Анализ без дополнительного контекста")
+    except KeyboardInterrupt:
+        print("\nОтмена операции")
+        return
+    
     # Initialize analyzer
     try:
         analyzer = CTAnalyzer()
@@ -45,23 +62,25 @@ def main():
     
     # Analysis mode selection
     print("\nДоступные режимы анализа:")
-    print("1. Med42 - Специализированная медицинская ИИ модель")
-    print("2. Hybrid - Комбинированный анализ (Llama Vision + Med42)")
+    print("1. 🏥 MedGemma - Специализированная медицинская ИИ модель Google (РЕКОМЕНДУЕТСЯ)")
+    print("2. Med42 - Специализированная медицинская ИИ модель")
+    print("3. 🔍 Comprehensive - Полный анализ всех изображений")
     
     while True:
         try:
-            choice = input("\nВыберите режим анализа (1-2): ").strip()
-            if choice in ['1', '2']:
+            choice = input("\nВыберите режим анализа (1-3): ").strip()
+            if choice in ['1', '2', '3']:
                 break
-            print("Пожалуйста, введите 1 или 2")
+            print("Пожалуйста, введите 1, 2 или 3")
         except KeyboardInterrupt:
             print("\nОтмена операции")
             return
     
     # Map choice to analysis mode
     mode_map = {
-        '1': 'med42', 
-        '2': 'hybrid'
+        '1': 'medgemma',
+        '2': 'med42', 
+        '3': 'comprehensive'
     }
     
     analysis_mode = mode_map[choice]
@@ -70,16 +89,15 @@ def main():
     # Run analysis
     try:
         print("Запуск анализа...")
-        result = analyzer.analyze_directory(input_dir, mode=analysis_mode)
+        result = analyzer.analyze_directory(input_dir, mode=analysis_mode, user_context=user_context)
         
         if result:
             print("\n=== АНАЛИЗ ЗАВЕРШЁН ===")
-            print("Результаты сохранены в директории 'output'")
+            print("Результаты отображены выше")
             
-            # Display summary
-            if 'summary' in result:
-                print("\nКраткое резюме:")
-                print(result['summary'][:500] + "..." if len(result['summary']) > 500 else result['summary'])
+            # Show context info if provided
+            if user_context:
+                print(f"\n📋 Использованный контекст: {user_context}")
                 
         else:
             print("Анализ завершился без результатов")

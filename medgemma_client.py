@@ -204,18 +204,28 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             return None
         
         print(f"🔍 MedGemma анализ CT исследования ({len(images)} изображений)...")
+        print("🏥 Обрабатываем ВСЕ изображения для полного анализа")
         
         try:
-            # Анализируем каждое изображение
+            # Анализируем ВСЕ изображения
             individual_analyses = []
             
-            # Ограничиваем количество изображений для анализа
-            max_images = min(len(images), 5)
+            # Обрабатываем изображения пакетами для стабильности
+            batch_size = 10
+            total_batches = (len(images) + batch_size - 1) // batch_size
             
-            for i, image_data in enumerate(images[:max_images], 1):
-                print(f"📊 Анализ изображения {i}/{max_images}: ", end="")
+            for batch_idx in range(total_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(images))
+                batch_images = images[start_idx:end_idx]
                 
-                slice_prompt = f"""Analyze this CT slice #{i} from a medical study.
+                print(f"📦 Обработка пакета {batch_idx + 1}/{total_batches} ({len(batch_images)} изображений)...")
+                
+                for i, image_data in enumerate(batch_images):
+                    global_idx = start_idx + i + 1
+                    print(f"📊 Анализ изображения {global_idx}/{len(images)}: ", end="")
+                    
+                    slice_prompt = f"""Analyze this CT slice #{global_idx} from a medical study.
 
 {f"Study Context: {study_context}" if study_context else ""}
 
@@ -223,24 +233,34 @@ Please provide:
 1. Anatomical structures visible in this slice
 2. Any pathological findings
 3. Clinical significance of findings
-4. Relationship to adjacent slices (if applicable)
+4. Slice position and anatomical level
 
-Focus on medically relevant observations."""
+Focus on medically relevant observations. Be concise but thorough."""
+                    
+                    analysis = self.analyze_medical_image(image_data, slice_prompt)
+                    
+                    if analysis:
+                        individual_analyses.append(f"=== CT SLICE {global_idx} ===\n{analysis}")
+                        print("✅")
+                    else:
+                        print("❌")
                 
-                analysis = self.analyze_medical_image(image_data, slice_prompt)
-                
-                if analysis:
-                    individual_analyses.append(f"=== CT SLICE {i} ===\n{analysis}")
-                    print("✅")
-                else:
-                    print("❌")
+                # Небольшая пауза между пакетами для стабильности
+                if batch_idx < total_batches - 1:
+                    print("⏸️ Пауза между пакетами...")
+                    import time
+                    time.sleep(2)
             
             if not individual_analyses:
                 return None
             
+            print(f"📋 Создание общего отчёта из {len(individual_analyses)} проанализированных изображений...")
+            
             # Создаём общий анализ исследования
             study_summary = self.analyze_medical_text(
-                f"""Based on the following CT study analysis, provide a comprehensive radiology report:
+                f"""Based on the following comprehensive CT study analysis, provide a detailed radiology report:
+
+ANALYZED SLICES: {len(individual_analyses)} of {len(images)} total images
 
 {chr(10).join(individual_analyses)}
 
@@ -253,18 +273,20 @@ Please provide a structured radiology report including:
 3. IMPRESSION/CONCLUSION
 4. RECOMMENDATIONS
 
-Format as a professional radiology report.""",
-                "CT study comprehensive analysis"
+Format as a professional radiology report with detailed findings.""",
+                "Complete CT study comprehensive analysis"
             )
             
             # Объединяем результаты
-            final_report = f"""=== MEDGEMMA CT STUDY ANALYSIS ===
+            final_report = f"""=== MEDGEMMA COMPLETE CT STUDY ANALYSIS ===
 
 STUDY DETAILS:
-- Images analyzed: {len(individual_analyses)} of {len(images)} total
+- Total images in study: {len(images)}
+- Images successfully analyzed: {len(individual_analyses)}
 - Analysis date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - Model: MedGemma 4B (Google) - Vision + Text
 - Analysis method: Direct image analysis
+- Processing method: Batch processing for stability
 
 === INDIVIDUAL SLICE ANALYSES ===
 

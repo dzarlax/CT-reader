@@ -54,8 +54,39 @@ class ComprehensiveAnalyzer:
         self.context_file = None
         self.session_id = None
         
+    def analyze_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Analyze CT study with optional user context
+        
+        Args:
+            images: List of processed image data
+            user_context: Additional context from user (symptoms, age, etc.)
+            
+        Returns:
+            Comprehensive analysis results
+        """
+        print(f"🔍 Comprehensive анализ CT исследования ({len(images)} изображений)")
+        
+        if user_context:
+            print(f"📝 Дополнительный контекст: {user_context}")
+        
+        try:
+            # Use the comprehensive analysis method with user context
+            result = self.analyze_complete_study(images, mode="comprehensive", user_context=user_context)
+            
+            if result:
+                print("✅ Comprehensive анализ завершён")
+                return result
+            else:
+                print("❌ Comprehensive анализ не дал результатов")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Ошибка Comprehensive анализа: {e}")
+            return None
+        
     def analyze_complete_study(self, images: List[Dict[str, Any]], 
-                             mode: str = "comprehensive") -> Dict[str, Any]:
+                             mode: str = "comprehensive", user_context: str = "") -> Dict[str, Any]:
         """Analyze ALL images in the study with context preservation"""
         
         # Initialize session
@@ -76,6 +107,7 @@ class ComprehensiveAnalyzer:
             "start_time": datetime.now().isoformat(),
             "total_images": len(images),
             "mode": mode,
+            "user_context": user_context,  # Добавляем пользовательский контекст
             "progress": {
                 "processed": 0,
                 "current_batch": 0,

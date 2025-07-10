@@ -40,32 +40,45 @@ class MedGemmaAnalyzer:
         else:
             raise ValueError("MedGemma клиент не найден")
     
-    def analyze_images(self, images: List[Dict[str, Any]]) -> Optional[str]:
+    def analyze_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[Dict[str, Any]]:
         """
-        Анализирует изображения с помощью MedGemma (прямой анализ изображений)
+        Analyze complete CT study using MedGemma
         
         Args:
-            images: Список изображений для анализа
+            images: List of DICOM images to analyze
+            user_context: Additional context from user (symptoms, age, etc.)
             
         Returns:
-            Результат медицинского анализа
+            Complete analysis results
         """
-        if not self.use_medgemma:
+        if not images:
+            print("❌ Нет изображений для анализа")
             return None
-        
-        print(f"🔍 Начинаем MedGemma анализ {len(images)} изображений...")
-        print("🏥 Используем прямой анализ изображений (Vision + Text)")
-        
-        # Используем новый метод прямого анализа CT исследования
-        try:
-            result = self.medgemma_client.analyze_ct_study(
-                images, 
-                "CT scan analysis for medical diagnosis"
-            )
             
-            if result:
+        print(f"🏥 Запуск MedGemma анализа ({len(images)} изображений)")
+        
+        # Prepare study context
+        study_context = "CT Study Analysis"
+        if user_context:
+            study_context += f"\n\nПредоставленный контекст: {user_context}"
+            
+        try:
+            # Analyze using MedGemma client
+            analysis_result = self.medgemma_client.analyze_ct_study(images, study_context)
+            
+            if analysis_result:
                 print("✅ MedGemma анализ завершён успешно")
-                return result
+                
+                # Return structured result
+                return {
+                    'mode': 'medgemma',
+                    'model': 'MedGemma 4B (Google)',
+                    'timestamp': datetime.now().isoformat(),
+                    'image_count': len(images),
+                    'user_context': user_context,
+                    'analysis': analysis_result,
+                    'success': True
+                }
             else:
                 print("❌ MedGemma анализ не дал результатов")
                 return None
