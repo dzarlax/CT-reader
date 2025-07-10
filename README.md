@@ -1,101 +1,101 @@
 # CT Reader - Advanced Medical Image Analysis System
 
-A comprehensive CT scan analysis system with multiple AI-powered analysis modes and intelligent image processing capabilities.
+Система анализа медицинских КТ-изображений с использованием специализированных ИИ моделей.
 
-## Features
+## Основные режимы анализа
 
-### 🔬 Multiple Analysis Modes
-- **Med42**: Specialized medical AI model optimized for healthcare applications  
-- **Hybrid Mode**: Combines Llama Vision for image analysis with Med42 for medical interpretation
+### 🏥 MedGemma (РЕКОМЕНДУЕТСЯ)
+- **Модель**: Google MedGemma 4B - специализированная медицинская модель
+- **Возможности**: Прямой анализ изображений + текст
+- **Особенности**: Обрабатывает ВСЕ изображения, высокая точность медицинской интерпретации
+- **Требования**: GPU с минимум 8GB памяти
 
-### 🎯 Intelligent Processing
-- **Strategic Image Selection**: Automatically selects the most diagnostically relevant images
-- **Token Optimization**: Efficient processing to maximize analysis quality within API limits
-- **Comprehensive Reporting**: Detailed medical reports with findings and recommendations
+### 📋 Med42
+- **Модель**: Med42-8B - быстрая медицинская модель
+- **Возможности**: Текстовый медицинский анализ
+- **Особенности**: Быстрая обработка, хорошо для базового анализа
 
-### 🏥 Medical Focus
-- Anatomical structure identification
-- Pathological findings detection
-- System-based analysis (respiratory, cardiovascular, GI, genitourinary, musculoskeletal)
-- Differential diagnosis suggestions
-- Clinical recommendations
+### 🔍 Comprehensive
+- **Возможности**: Полный анализ всех изображений с контекстом
+- **Особенности**: Использует несколько моделей, сохраняет контекст между изображениями
 
-## Installation
+## Системные требования
 
-1. Clone the repository:
-```cmd
+### Для сервера с CUDA:
+- **GPU**: NVIDIA с поддержкой CUDA, минимум 8GB VRAM для MedGemma
+- **RAM**: Минимум 16GB системной памяти
+- **Python**: 3.8+
+- **CUDA**: 11.8+ или 12.x
+
+### Для Mac (разработка):
+- **GPU**: Apple Silicon с поддержкой MPS
+- **RAM**: Минимум 16GB unified memory
+- **Python**: 3.8+
+
+## Установка
+
+```bash
+# Клонируйте репозиторий
 git clone <repository-url>
 cd CT-reader
-```
 
-2. Install dependencies:
-```cmd
+# Создайте виртуальное окружение
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# или
+.venv\Scripts\activate     # Windows
+
+# Установите зависимости
 pip install -r requirements.txt
+
+# Создайте .env файл с токеном Hugging Face
+echo "HUGGINGFACE_TOKEN=your_token_here" > .env
 ```
 
-3. Configure Ollama settings in `config.py`
+## Запуск
 
-## Quick Start
-
-### Basic Analysis
-```cmd
+### Основной режим
+```bash
 python main.py
 ```
 
-### Analysis Modes Demo
-```cmd
+### Демонстрационный режим
+```bash
 python demo.py
 ```
 
-### Hybrid Mode Demo
-```cmd
-python demo_hybrid.py
-```
+## Использование
 
-## Configuration
+1. **Подготовка данных**: Поместите DICOM файлы в папку `input/`
+2. **Запуск анализа**: Выберите режим анализа (рекомендуется MedGemma)
+3. **Дополнительный контекст**: Введите информацию о пациенте для улучшения анализа
+4. **Результаты**: Анализ отображается в консоли
 
-Edit `config.py` to configure:
-- Ollama settings and model paths
-- Med42 model configuration
-- Analysis parameters
-- Image processing settings
-- Output preferences
+## Дополнительный контекст
 
-## File Structure
+Система поддерживает ввод дополнительной клинической информации:
+- Возраст пациента
+- Симптомы
+- Область исследования
+- Подозрения на заболевания
+- Анамнез
 
-```
-CT-reader/
-├── main.py              # Main application entry point
-├── ct_analyzer.py       # Core analysis orchestrator
-├── config.py           # Configuration and prompts
-├── image_processor.py   # DICOM image processing
+## Оптимизация для GPU
 
-├── med42_client.py      # Med42 model integration
-├── llama_vision_client.py # Llama Vision integration
-├── llama_med42_client.py  # Hybrid analysis client
-├── demo.py             # Individual mode demonstrations
-├── demo_hybrid.py      # Hybrid mode demonstration
-├── requirements.txt    # Python dependencies
-├── input/              # DICOM input directory
-├── output/             # Analysis results
-└── temp/               # Temporary processing files
-```
+Система автоматически:
+- Определяет доступные GPU (CUDA/MPS)
+- Настраивает параметры памяти
+- Обрабатывает изображения пакетами для стабильности
+- Очищает память между пакетами
 
-## Usage Examples
+## Устранение неполадок
 
-### Med42 Analysis  
-Specialized medical AI analysis optimized for healthcare applications using local models.
+### Ошибки CUDA памяти
+- Перезапустите программу
+- Убедитесь что другие GPU процессы не используют память
+- Проверьте доступную VRAM: `nvidia-smi`
 
-### Hybrid Analysis
-Combines Llama Vision for detailed image analysis with Med42 for medical interpretation.
-
-## Requirements
-
-- Python 3.8+
-- Ollama (for Llama Vision mode)
-- Sufficient disk space for DICOM files and models
-- GPU recommended for Med42 model
-
-## Support
-
-For issues and questions, please refer to the documentation or create an issue in the repository. 
+### Медленная работа
+- Убедитесь что используется GPU, а не CPU
+- Проверьте загрузку GPU: `nvidia-smi`
+- Увеличьте паузы между пакетами если нужно 

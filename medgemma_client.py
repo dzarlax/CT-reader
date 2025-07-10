@@ -34,8 +34,37 @@ class MedGemmaClient:
         self.processor = None
         self.model = None
         
-        print(f"🔧 Инициализация MedGemma клиента...")
-        print(f"📱 Устройство: {self.device}")
+        print("🔧 Инициализация MedGemma клиента...")
+        
+        # Определяем устройство
+        if torch.cuda.is_available():
+            self.device = "cuda"
+            print(f"📱 Устройство: {self.device}")
+            # Очищаем CUDA кэш для предотвращения конфликтов
+            torch.cuda.empty_cache()
+            print("🧹 CUDA кэш очищен")
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+            print(f"📱 Устройство: {self.device}")
+        else:
+            self.device = "cpu"
+            print(f"📱 Устройство: {self.device}")
+            
+        # Настройки для стабильной работы с GPU
+        if self.device == "cuda":
+            # Устанавливаем переменные окружения для стабильной работы CUDA
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+            os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+            print("🔧 Настройки CUDA для стабильной работы установлены")
+            
+            # Проверяем доступную память GPU
+            if torch.cuda.is_available():
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                gpu_memory_free = torch.cuda.memory_reserved(0) / 1024**3
+                print(f"💾 GPU память: {gpu_memory:.1f}GB общая, {gpu_memory_free:.1f}GB свободная")
+                
+                if gpu_memory < 8:
+                    print("⚠️ Предупреждение: Мало GPU памяти для MedGemma. Рекомендуется минимум 8GB")
         
         # Проверяем наличие токена авторизации
         self.token = os.getenv("HUGGINGFACE_TOKEN")
@@ -164,18 +193,22 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             
             input_len = inputs["input_ids"].shape[-1]
             
-            # Генерируем ответ
-            with torch.inference_mode():
-                generation = self.model.generate(
-                    **inputs, 
+            # Генерируем анализ с правильными параметрами для MedGemma
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
                     max_new_tokens=512,
-                    do_sample=False,
-                    temperature=0.7 if self.device != "cpu" else 1.0
+                    do_sample=True,
+                    top_p=0.9,
+                    top_k=50,
+                    repetition_penalty=1.1,
+                    pad_token_id=self.processor.tokenizer.pad_token_id,
+                    eos_token_id=self.processor.tokenizer.eos_token_id,
+                    use_cache=True
                 )
-                generation = generation[0][input_len:]
             
             # Декодируем ответ
-            response = self.processor.decode(generation, skip_special_tokens=True)
+            response = self.processor.decode(outputs[0], skip_special_tokens=True)
             
             # Логируем полный ответ
             print("🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Анализ изображения):")
@@ -183,10 +216,23 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             print(response)
             print("=" * 50)
             
+            # Очищаем память после анализа
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            elif self.device == "mps":
+                torch.mps.empty_cache()
+                
             return response.strip()
             
         except Exception as e:
             print(f"❌ Ошибка анализа изображения MedGemma: {e}")
+            
+            # Очищаем память при ошибке
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            elif self.device == "mps":
+                torch.mps.empty_cache()
+                
             return None
     
     def analyze_ct_study(self, images: List[Dict[str, Any]], study_context: str = "") -> Optional[str]:
@@ -211,7 +257,7 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             individual_analyses = []
             
             # Обрабатываем изображения пакетами для стабильности
-            batch_size = 10
+            batch_size = 5  # Уменьшаем размер пакета для GPU
             total_batches = (len(images) + batch_size - 1) // batch_size
             
             for batch_idx in range(total_batches):
@@ -220,6 +266,12 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
                 batch_images = images[start_idx:end_idx]
                 
                 print(f"📦 Обработка пакета {batch_idx + 1}/{total_batches} ({len(batch_images)} изображений)...")
+                
+                # Очищаем память перед обработкой пакета
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                elif self.device == "mps":
+                    torch.mps.empty_cache()
                 
                 for i, image_data in enumerate(batch_images):
                     global_idx = start_idx + i + 1
@@ -245,11 +297,11 @@ Focus on medically relevant observations. Be concise but thorough."""
                     else:
                         print("❌")
                 
-                # Небольшая пауза между пакетами для стабильности
+                # Пауза между пакетами для стабильности GPU
                 if batch_idx < total_batches - 1:
-                    print("⏸️ Пауза между пакетами...")
+                    print("⏸️ Пауза между пакетами для стабильности GPU...")
                     import time
-                    time.sleep(2)
+                    time.sleep(3)  # Увеличиваем паузу для GPU
             
             if not individual_analyses:
                 return None
@@ -302,6 +354,21 @@ STUDY DETAILS:
             
         except Exception as e:
             print(f"❌ Ошибка анализа CT исследования: {e}")
+            
+            # Специальная обработка ошибок CUDA
+            if "CUDA" in str(e) or "NVML" in str(e):
+                print("🔧 Обнаружена ошибка CUDA - попытка восстановления...")
+                
+                # Очищаем всю CUDA память
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    
+                print("💡 Рекомендации:")
+                print("   - Перезапустите программу")
+                print("   - Убедитесь что другие GPU процессы не используют память")
+                print("   - Рассмотрите уменьшение размера пакета")
+                
             return None
     
     def analyze_medical_text(self, text: str, context: str = "") -> Optional[str]:
