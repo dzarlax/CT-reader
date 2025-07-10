@@ -1,96 +1,121 @@
 #!/usr/bin/env python3
 """
-MedGemma Client
-Клиент для работы с MedGemma 4B - специализированной медицинской моделью от Google
-Поддерживает анализ изображений и текста
+MedGemma Client - Google's Medical AI Model
+Direct integration with MedGemma for medical image analysis
 """
 
+import os
 import torch
+import time
+from typing import List, Dict, Any, Optional
 from transformers import AutoProcessor, AutoModelForImageTextToText
 from PIL import Image
-import base64
-from io import BytesIO
-from typing import Optional, Dict, Any, List
-import logging
-import os
-from dotenv import load_dotenv
-from datetime import datetime
-
-# Загружаем переменные окружения из .env файла
-load_dotenv()
+import config
+from progress_logger import (
+    show_step, show_success, show_error, show_info, show_warning, 
+    start_progress, update_progress, complete_progress, 
+    log_to_file, suppress_prints
+)
 
 class MedGemmaClient:
-    """Клиент для MedGemma 4B - медицинской модели от Google с поддержкой изображений"""
+    """Client for Google's MedGemma medical AI model"""
     
-    def __init__(self, model_name: str = "google/medgemma-4b-it"):
-        """
-        Инициализация MedGemma клиента
-        
-        Args:
-            model_name: Название модели на Hugging Face
-        """
-        self.model_name = model_name
+    def __init__(self):
+        """Initialize MedGemma client"""
+        self.model_name = "google/medgemma-4b-it"
         self.device = self._get_device()
         self.processor = None
         self.model = None
+        self.token = None
         
-        print("🔧 Инициализация MedGemma клиента...")
-        
-        # Определяем устройство
-        if torch.cuda.is_available():
-            self.device = "cuda"
-            print(f"📱 Устройство: {self.device}")
-            # Очищаем CUDA кэш для предотвращения конфликтов
-            torch.cuda.empty_cache()
-            print("🧹 CUDA кэш очищен")
-        elif torch.backends.mps.is_available():
-            self.device = "mps"
-            print(f"📱 Устройство: {self.device}")
-        else:
-            self.device = "cpu"
-            print(f"📱 Устройство: {self.device}")
+        # Load model with progress tracking
+        self._initialize_model()
+    
+    def _initialize_model(self):
+        """Initialize MedGemma model with progress tracking"""
+        try:
+            show_step("Инициализация MedGemma клиента")
+            log_to_file("Starting MedGemma client initialization")
             
-        # Настройки для стабильной работы с GPU
-        if self.device == "cuda":
-            # Устанавливаем переменные окружения для стабильной работы CUDA
-            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
-            os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-            print("🔧 Настройки CUDA для стабильной работы установлены")
+            # Setup device and memory
+            self._setup_device()
+            self._setup_cuda_environment()
+            self._check_gpu_memory()
+            self._setup_huggingface_token()
             
-            # Проверяем доступную память GPU
-            if torch.cuda.is_available():
-                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                gpu_memory_free = torch.cuda.memory_reserved(0) / 1024**3
-                print(f"💾 GPU память: {gpu_memory:.1f}GB общая, {gpu_memory_free:.1f}GB свободная")
-                
-                if gpu_memory < 8:
-                    print("⚠️ Предупреждение: Мало GPU памяти для MedGemma. Рекомендуется минимум 8GB")
-        
-        # Проверяем наличие токена авторизации
-        self.token = os.getenv("HUGGINGFACE_TOKEN")
-        if self.token:
-            print("✅ Токен Hugging Face найден в .env файле")
-            print(f"🔑 Токен начинается с: {self.token[:10]}...")
-        else:
-            print("❌ Токен Hugging Face не найден в .env файле!")
-            print("💡 Добавьте HUGGINGFACE_TOKEN=your_token в .env файл")
-            raise ValueError("Токен Hugging Face обязателен для работы с MedGemma")
-        
-        self._load_model()
+            # Load model with suppressed prints
+            with suppress_prints():
+                self._load_model()
+            
+            show_success("MedGemma клиент инициализирован успешно")
+            log_to_file("MedGemma client initialized successfully")
+            
+        except Exception as e:
+            show_error(f"Ошибка загрузки MedGemma: {e}")
+            log_to_file(f"MedGemma initialization error: {e}", "ERROR")
+            raise
     
     def _get_device(self) -> str:
-        """Определяет оптимальное устройство для вычислений"""
+        """Determine the best available device"""
         if torch.cuda.is_available():
             return "cuda"
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return "mps"  # Apple Silicon GPU
+        elif torch.backends.mps.is_available():
+            return "mps"
         else:
             return "cpu"
+    
+    def _setup_device(self):
+        """Setup device and clear cache"""
+        self.device = self._get_device()
+        show_info(f"📱 Устройство: {self.device}")
+        log_to_file(f"Device: {self.device}")
+        
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+            show_info("🧹 CUDA кэш очищен")
+            log_to_file("CUDA cache cleared")
+    
+    def _setup_cuda_environment(self):
+        """Setup CUDA environment variables"""
+        if self.device == "cuda":
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+            os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+            show_info("🔧 Настройки CUDA для стабильной работы установлены")
+            log_to_file("CUDA environment variables set for stability")
+    
+    def _check_gpu_memory(self):
+        """Check GPU memory availability"""
+        if self.device == "cuda" and torch.cuda.is_available():
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            gpu_memory_free = torch.cuda.memory_reserved(0) / 1024**3
+            show_info(f"💾 GPU память: {gpu_memory:.1f}GB общая, {gpu_memory_free:.1f}GB свободная")
+            log_to_file(f"GPU memory: {gpu_memory:.1f}GB total, {gpu_memory_free:.1f}GB free")
+            
+            if gpu_memory < 8:
+                show_warning("⚠️ Предупреждение: Мало GPU памяти для MedGemma. Рекомендуется минимум 8GB")
+                log_to_file("Warning: Low GPU memory for MedGemma. Minimum 8GB recommended", "WARNING")
+    
+    def _setup_huggingface_token(self):
+        """Setup Hugging Face token"""
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        self.token = os.getenv("HUGGINGFACE_TOKEN")
+        if self.token:
+            show_success("✅ Токен Hugging Face найден в .env файле")
+            log_to_file("Hugging Face token found in .env file")
+            show_info(f"🔑 Токен начинается с: {self.token[:10]}...")
+            log_to_file(f"Token starts with: {self.token[:10]}...")
+        else:
+            show_error("❌ Токен Hugging Face не найден в .env файле!")
+            show_info("💡 Добавьте HUGGINGFACE_TOKEN=your_token в .env файл")
+            log_to_file("Hugging Face token not found in .env file", "ERROR")
+            raise ValueError("Токен Hugging Face обязателен для работы с MedGemma")
     
     def _load_model(self):
         """Загружает модель и процессор"""
         try:
-            print(f"📥 Загрузка MedGemma модели: {self.model_name}")
+            show_step(f"📥 Загрузка MedGemma модели: {self.model_name}")
             
             # Загружаем модель для работы с изображениями и текстом
             self.model = AutoModelForImageTextToText.from_pretrained(
@@ -111,16 +136,12 @@ class MedGemmaClient:
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
             
-            print(f"✅ MedGemma модель успешно загружена на {self.device}")
-            print(f"🔧 Модель поддерживает: изображения + текст")
+            show_success(f"✅ MedGemma модель успешно загружена на {self.device}")
+            log_to_file(f"MedGemma model loaded successfully on {self.device}")
             
         except Exception as e:
-            print(f"❌ Ошибка загрузки MedGemma: {e}")
-            print("💡 Убедитесь, что:")
-            print("   1. У вас есть доступ к модели google/medgemma-4b-it")
-            print("   2. Установлена переменная окружения HUGGINGFACE_TOKEN")
-            print("   3. Токен имеет необходимые права доступа")
-            print("   4. Установлена библиотека accelerate: pip install accelerate")
+            show_error(f"❌ Ошибка загрузки MedGemma: {e}")
+            log_to_file(f"MedGemma model loading error: {e}", "ERROR")
             raise
     
     def analyze_medical_image(self, image_data: Dict[str, Any], prompt: str = "") -> Optional[str]:
@@ -135,7 +156,8 @@ class MedGemmaClient:
             Медицинский анализ изображения
         """
         if not self.model or not self.processor:
-            print("❌ Модель не загружена")
+            show_error("❌ Модель не загружена")
+            log_to_file("Model not loaded for image analysis")
             return None
         
         try:
@@ -211,10 +233,11 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             response = self.processor.decode(outputs[0], skip_special_tokens=True)
             
             # Логируем полный ответ
-            print("🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Анализ изображения):")
-            print("=" * 50)
-            print(response)
-            print("=" * 50)
+            show_info("🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Анализ изображения):")
+            log_to_file("Full MedGemma response (Image Analysis):")
+            log_to_file("=" * 50)
+            log_to_file(response)
+            log_to_file("=" * 50)
             
             # Очищаем память после анализа
             if self.device == "cuda":
@@ -225,7 +248,8 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
             return response.strip()
             
         except Exception as e:
-            print(f"❌ Ошибка анализа изображения MedGemma: {e}")
+            show_error(f"❌ Ошибка анализа изображения MedGemma: {e}")
+            log_to_file(f"MedGemma image analysis error: {e}", "ERROR")
             
             # Очищаем память при ошибке
             if self.device == "cuda":
@@ -249,8 +273,10 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
         if not images:
             return None
         
-        print(f"🔍 MedGemma анализ CT исследования ({len(images)} изображений)...")
-        print("🏥 Обрабатываем ВСЕ изображения для полного анализа")
+        show_info(f"🔍 MedGemma анализ CT исследования ({len(images)} изображений)...")
+        log_to_file(f"MedGemma CT study analysis ({len(images)} images)...")
+        show_info("🏥 Обрабатываем ВСЕ изображения для полного анализа")
+        log_to_file("Processing ALL images for comprehensive analysis")
         
         try:
             # Анализируем ВСЕ изображения
@@ -265,7 +291,8 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
                 end_idx = min(start_idx + batch_size, len(images))
                 batch_images = images[start_idx:end_idx]
                 
-                print(f"📦 Обработка пакета {batch_idx + 1}/{total_batches} ({len(batch_images)} изображений)...")
+                show_info(f"📦 Обработка пакета {batch_idx + 1}/{total_batches} ({len(batch_images)} изображений)...")
+                log_to_file(f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch_images)} images)...")
                 
                 # Очищаем память перед обработкой пакета
                 if self.device == "cuda":
@@ -275,7 +302,8 @@ Provide detailed, clinically relevant analysis focused on diagnostic and therape
                 
                 for i, image_data in enumerate(batch_images):
                     global_idx = start_idx + i + 1
-                    print(f"📊 Анализ изображения {global_idx}/{len(images)}: ", end="")
+                    show_info(f"📊 Анализ изображения {global_idx}/{len(images)}: ", end="")
+                    log_to_file(f"Analyzing image {global_idx}/{len(images)}: ")
                     
                     slice_prompt = f"""Analyze this CT slice #{global_idx} from a medical study.
 
@@ -293,20 +321,23 @@ Focus on medically relevant observations. Be concise but thorough."""
                     
                     if analysis:
                         individual_analyses.append(f"=== CT SLICE {global_idx} ===\n{analysis}")
-                        print("✅")
+                        show_success("✅")
+                        log_to_file(f"CT Slice {global_idx} analysis successful")
                     else:
-                        print("❌")
+                        show_error("❌")
+                        log_to_file(f"CT Slice {global_idx} analysis failed")
                 
                 # Пауза между пакетами для стабильности GPU
                 if batch_idx < total_batches - 1:
-                    print("⏸️ Пауза между пакетами для стабильности GPU...")
-                    import time
+                    show_warning("⏸️ Пауза между пакетами для стабильности GPU...")
+                    log_to_file("⏸️ Pause between batches for GPU stability...")
                     time.sleep(3)  # Увеличиваем паузу для GPU
             
             if not individual_analyses:
                 return None
             
-            print(f"📋 Создание общего отчёта из {len(individual_analyses)} проанализированных изображений...")
+            show_info(f"📋 Создание общего отчёта из {len(individual_analyses)} проанализированных изображений...")
+            log_to_file(f"Creating comprehensive study report from {len(individual_analyses)} analyzed images...")
             
             # Создаём общий анализ исследования
             study_summary = self.analyze_medical_text(
@@ -353,21 +384,23 @@ STUDY DETAILS:
             return final_report
             
         except Exception as e:
-            print(f"❌ Ошибка анализа CT исследования: {e}")
+            show_error(f"❌ Ошибка анализа CT исследования: {e}")
+            log_to_file(f"MedGemma CT study analysis error: {e}", "ERROR")
             
             # Специальная обработка ошибок CUDA
             if "CUDA" in str(e) or "NVML" in str(e):
-                print("🔧 Обнаружена ошибка CUDA - попытка восстановления...")
+                show_warning("🔧 Обнаружена ошибка CUDA - попытка восстановления...")
+                log_to_file("CUDA error detected - attempting recovery...")
                 
                 # Очищаем всю CUDA память
                 if self.device == "cuda":
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     
-                print("💡 Рекомендации:")
-                print("   - Перезапустите программу")
-                print("   - Убедитесь что другие GPU процессы не используют память")
-                print("   - Рассмотрите уменьшение размера пакета")
+                show_info("💡 Рекомендации:")
+                show_warning("   - Перезапустите программу")
+                show_warning("   - Убедитесь что другие GPU процессы не используют память")
+                show_warning("   - Рассмотрите уменьшение размера пакета")
                 
             return None
     
@@ -383,7 +416,8 @@ STUDY DETAILS:
             Медицинский анализ от MedGemma
         """
         if not self.model or not self.processor:
-            print("❌ Модель не загружена")
+            show_error("❌ Модель не загружена")
+            log_to_file("Model not loaded for text analysis")
             return None
         
         try:
@@ -448,15 +482,17 @@ Analysis:"""
             response = self.processor.decode(generation, skip_special_tokens=True)
             
             # Логируем полный ответ
-            print("🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Текстовый анализ):")
-            print("=" * 50)
-            print(response)
-            print("=" * 50)
+            show_info("🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Текстовый анализ):")
+            log_to_file("Full MedGemma response (Text Analysis):")
+            log_to_file("=" * 50)
+            log_to_file(response)
+            log_to_file("=" * 50)
             
             return response.strip()
             
         except Exception as e:
-            print(f"❌ Ошибка анализа MedGemma: {e}")
+            show_error(f"❌ Ошибка анализа MedGemma: {e}")
+            log_to_file(f"MedGemma text analysis error: {e}", "ERROR")
             return None
     
     def analyze_radiology_finding(self, finding: str, image_context: str = "") -> Optional[str]:
@@ -498,21 +534,23 @@ As a medical AI assistant specialized in radiology, please provide:
 
 def test_medgemma():
     """Тест MedGemma клиента с изображениями"""
-    print("🧪 ТЕСТ MEDGEMMA КЛИЕНТА (С ИЗОБРАЖЕНИЯМИ)")
-    print("=" * 50)
+    show_step("🧪 ТЕСТ MEDGEMMA КЛИЕНТА (С ИЗОБРАЖЕНИЯМИ)")
+    log_to_file("Starting MedGemma client test (with images)")
     
     try:
         # Инициализируем клиент
         client = MedGemmaClient()
         
         # Тест анализа изображений
-        print("\n📊 Тест анализа изображений...")
+        show_info("\n📊 Тест анализа изображений...")
+        log_to_file("\n📊 MedGemma image analysis test...")
         
         from image_processor import ImageProcessor
         
         # Проверяем наличие изображений
         if not os.path.exists("input"):
-            print("❌ Директория 'input' не найдена")
+            show_error("❌ Директория 'input' не найдена")
+            log_to_file("Input directory 'input' not found")
             return
         
         # Загружаем изображения
@@ -520,35 +558,45 @@ def test_medgemma():
         images = image_processor.load_dicom_series("input")
         
         if not images:
-            print("❌ Изображения не найдены")
+            show_error("❌ Изображения не найдены")
+            log_to_file("Images not found")
             return
         
         # Тестируем на первом изображении
         test_image = images[0]
-        print(f"📷 Тестируем на изображении: {test_image.get('filename', 'unknown')}")
+        show_info(f"📷 Тестируем на изображении: {test_image.get('filename', 'unknown')}")
+        log_to_file(f"Testing on image: {test_image.get('filename', 'unknown')}")
         
         result = client.analyze_medical_image(test_image)
         
         if result:
-            print(f"\n✅ Анализ изображения получен (длина: {len(result)} символов)")
-            print(f"📄 Первые 200 символов: {result[:200]}...")
+            show_success(f"\n✅ Анализ изображения получен (длина: {len(result)} символов)")
+            log_to_file(f"\n✅ Image analysis received (length: {len(result)} characters)")
+            show_info(f"📄 Первые 200 символов: {result[:200]}...")
+            log_to_file(f"📄 First 200 characters: {result[:200]}...")
         else:
-            print("❌ Анализ изображения не получен")
+            show_error("❌ Анализ изображения не получен")
+            log_to_file("Image analysis not received")
         
         # Тест текстового анализа
-        print("\n📝 Тест текстового анализа...")
+        show_info("\n📝 Тест текстового анализа...")
+        log_to_file("\n📝 MedGemma text analysis test...")
         test_finding = "CT показывает увеличение плотности в правой доле печени"
         
         text_result = client.analyze_radiology_finding(test_finding)
         
         if text_result:
-            print(f"✅ Текстовый анализ получен (длина: {len(text_result)} символов)")
-            print(f"📄 Первые 200 символов: {text_result[:200]}...")
+            show_success(f"✅ Текстовый анализ получен (длина: {len(text_result)} символов)")
+            log_to_file(f"✅ Text analysis received (length: {len(text_result)} characters)")
+            show_info(f"📄 Первые 200 символов: {text_result[:200]}...")
+            log_to_file(f"📄 First 200 characters: {text_result[:200]}...")
         else:
-            print("❌ Текстовый анализ не получен")
+            show_error("❌ Текстовый анализ не получен")
+            log_to_file("Text analysis not received")
             
     except Exception as e:
-        print(f"❌ Ошибка теста: {e}")
+        show_error(f"❌ Ошибка теста: {e}")
+        log_to_file(f"Test error: {e}", "ERROR")
         import traceback
         traceback.print_exc()
 

@@ -1,171 +1,163 @@
 #!/usr/bin/env python3
 """
-MedGemma Analyzer
-Специализированный анализатор для медицинского анализа CT изображений с использованием MedGemma
+MedGemma Analyzer - Google's Medical AI Model Integration
+Provides direct medical image analysis using MedGemma model
 """
 
 import os
-import requests
-from datetime import datetime
+import sys
+import torch
+import time
 from typing import List, Dict, Any, Optional
-import base64
+from transformers import AutoProcessor, AutoModelForImageTextToText
+from PIL import Image
+import config
+from progress_logger import (
+    show_step, show_success, show_error, show_info, show_warning, 
+    start_progress, update_progress, complete_progress, 
+    log_to_file, suppress_prints
+)
 
-# Попробуем импортировать MedGemma
+# Check if MedGemma is available
 try:
-    from medgemma_client import MedGemmaClient
+    from transformers import AutoProcessor, AutoModelForImageTextToText
     MEDGEMMA_AVAILABLE = True
+    log_to_file("MedGemma dependencies available")
 except ImportError as e:
     MEDGEMMA_AVAILABLE = False
-    print(f"⚠️ MedGemma недоступна: {e}")
-
+    log_to_file(f"MedGemma недоступна: {e}", "WARNING")
 
 class MedGemmaAnalyzer:
-    """Анализатор с использованием MedGemma для медицинского анализа"""
+    """Medical image analysis using Google's MedGemma model"""
     
     def __init__(self):
-        self.base_url = "http://localhost:11434"
-        self.vision_model = "llama3.2-vision:latest"  # Для получения визуального описания
-        
-        # Инициализируем MedGemma клиент
-        if MEDGEMMA_AVAILABLE:
-            try:
-                self.medgemma_client = MedGemmaClient()
-                print("✅ MedGemma анализатор инициализирован")
-                self.use_medgemma = True
-            except Exception as e:
-                print(f"❌ Ошибка инициализации MedGemma: {e}")
-                self.medgemma_client = None
-                self.use_medgemma = False
-                raise ValueError("MedGemma недоступна для анализа")
-        else:
-            raise ValueError("MedGemma клиент не найден")
+        """Initialize MedGemma analyzer"""
+        if not MEDGEMMA_AVAILABLE:
+            show_error("MedGemma недоступна")
+            return
+            
+        try:
+            show_step("Инициализация MedGemma анализатора")
+            self.model_name = "google/medgemma-4b-it"
+            self.device = self._get_device()
+            self.processor = None
+            self.model = None
+            self._load_model()
+            show_success("MedGemma анализатор инициализирован")
+            
+        except Exception as e:
+            show_error(f"Ошибка инициализации MedGemma: {e}")
+            log_to_file(f"MedGemma initialization error: {e}", "ERROR")
+            raise
     
-    def analyze_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[Dict[str, Any]]:
+    def analyze_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
         """
-        Analyze complete CT study using MedGemma
+        Analyze CT study using MedGemma
         
         Args:
-            images: List of DICOM images to analyze
-            user_context: Additional context from user (symptoms, age, etc.)
+            images: List of processed image data
+            user_context: Additional context from user
             
         Returns:
-            Complete analysis results
+            Medical analysis text
         """
         if not images:
-            print("❌ Нет изображений для анализа")
+            show_error("Нет изображений для анализа")
             return None
             
-        print(f"🏥 Запуск MedGemma анализа ({len(images)} изображений)")
+        show_step(f"Запуск MedGemma анализа ({len(images)} изображений)")
+        log_to_file(f"Starting MedGemma analysis with {len(images)} images")
         
-        # Prepare study context
-        study_context = "CT Study Analysis"
         if user_context:
-            study_context += f"\n\nПредоставленный контекст: {user_context}"
-            
+            show_info(f"Дополнительный контекст: {user_context}")
+        
         try:
-            # Analyze using MedGemma client
-            analysis_result = self.medgemma_client.analyze_ct_study(images, study_context)
+            # Analyze all images with progress tracking
+            result = self._analyze_ct_study(images, user_context)
             
-            if analysis_result:
-                print("✅ MedGemma анализ завершён успешно")
-                
-                # Return structured result
-                return {
-                    'mode': 'medgemma',
-                    'model': 'MedGemma 4B (Google)',
-                    'timestamp': datetime.now().isoformat(),
-                    'image_count': len(images),
-                    'user_context': user_context,
-                    'analysis': analysis_result,
-                    'success': True
-                }
+            if result:
+                show_success("MedGemma анализ завершён успешно")
+                log_to_file("MedGemma analysis completed successfully")
+                return result
             else:
-                print("❌ MedGemma анализ не дал результатов")
+                show_warning("MedGemma анализ не дал результатов")
+                log_to_file("MedGemma analysis returned no results", "WARNING")
                 return None
                 
         except Exception as e:
-            print(f"❌ Ошибка MedGemma анализа: {e}")
+            show_error(f"Ошибка MedGemma анализа: {e}")
+            log_to_file(f"MedGemma analysis error: {e}", "ERROR")
             return None
     
-    def _get_visual_description(self, image_data: Dict[str, Any], image_num: int) -> Optional[str]:
-        """Получает визуальное описание изображения от Vision модели"""
-        
-        try:
-            prompt = f"""Analyze this CT image #{image_num} and provide a detailed visual description.
-
-Focus on:
-1. Anatomical structures visible
-2. Organ appearance and morphology
-3. Tissue densities and contrast
-4. Any abnormal findings or variations
-5. Image quality and technical factors
-
-Provide objective, detailed visual findings that can be used for medical interpretation."""
-            
-            payload = {
-                "model": self.vision_model,
-                "prompt": prompt,
-                "images": [image_data['base64_image']],
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,  # Более низкая температура для точности
-                    "num_predict": 600
-                }
-            }
-            
-            response = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=180)
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('response', '').strip()
-            else:
-                return None
-                
-        except Exception as e:
-            print(f"Ошибка получения визуального описания: {e}")
-            return None
+    def _get_device(self):
+        """Get the device for model loading"""
+        if torch.cuda.is_available():
+            return "cuda"
+        elif torch.backends.mps.is_available():
+            return "mps"
+        else:
+            return "cpu"
     
-    def _analyze_with_medgemma(self, visual_description: str, image_num: int) -> Optional[str]:
-        """Анализирует визуальное описание с помощью MedGemma"""
+    def _load_model(self):
+        """Load the MedGemma model and processor"""
+        try:
+            show_step("Загрузка модели MedGemma")
+            self.processor = AutoProcessor.from_pretrained(self.model_name)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_name)
+            self.model.to(self.device)
+            show_success("Модель MedGemma загружена")
+        except Exception as e:
+            show_error(f"Ошибка загрузки модели MedGemma: {e}")
+            log_to_file(f"Model loading error: {e}", "ERROR")
+            raise
+    
+    def _analyze_ct_study(self, images: List[Dict[str, Any]], user_context: str = "") -> Optional[str]:
+        """
+        Analyze a single CT image using MedGemma
+        
+        Args:
+            image_data: Dictionary containing 'image' (PIL Image) and 'dicom_data' (DICOM data)
+            user_context: Additional context from user
+            
+        Returns:
+            Medical analysis text for the image
+        """
+        if not self.model or not self.processor:
+            show_error("Модель MedGemma не инициализирована")
+            return None
+            
+        show_step(f"Анализ изображения {images[0]['dicom_data']['SeriesInstanceUID']}")
         
         try:
-            # Формируем специализированный медицинский промпт
-            medical_prompt = f"""CT Image #{image_num} Medical Analysis
-
-VISUAL FINDINGS:
-{visual_description}
-
-As a specialized medical AI, please provide comprehensive medical interpretation:
-
-1. ANATOMICAL ASSESSMENT:
-   - Identify anatomical structures and regions
-   - Assess normal vs abnormal anatomy
-   
-2. PATHOLOGICAL EVALUATION:
-   - Identify any pathological findings
-   - Assess severity and clinical significance
-   
-3. DIFFERENTIAL DIAGNOSIS:
-   - List possible diagnoses based on findings
-   - Prioritize by likelihood
-   
-4. CLINICAL RECOMMENDATIONS:
-   - Suggest additional imaging if needed
-   - Recommend clinical correlation
-   - Indicate urgency level
-
-Please provide detailed, clinically relevant analysis."""
+            # Prepare image for MedGemma
+            image_data = images[0]
+            image = Image.fromarray(image_data['image'])
             
-            # Используем MedGemma для анализа
-            analysis = self.medgemma_client.analyze_radiology_finding(
-                visual_description,
-                f"CT image #{image_num} analysis"
-            )
+            # Process image
+            inputs = self.processor(image, return_tensors="pt").to(self.device)
             
-            return analysis
+            # Generate text using MedGemma
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=1000,
+                    num_beams=5,
+                    temperature=0.3
+                )
+            
+            # Decode the generated text
+            generated_text = self.processor.decode(outputs[0], skip_special_tokens=True)
+            
+            # Add user context to the analysis
+            if user_context:
+                generated_text += f"\n\nПредоставленный контекст: {user_context}"
+            
+            show_success(f"Анализ изображения завершён: {generated_text}")
+            return generated_text
             
         except Exception as e:
-            print(f"Ошибка MedGemma анализа: {e}")
+            show_error(f"Ошибка анализа изображения: {e}")
+            log_to_file(f"Image analysis error: {e}", "ERROR")
             return None
     
     def _create_final_report(self, analyses: List[str]) -> str:

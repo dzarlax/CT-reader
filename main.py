@@ -8,17 +8,18 @@ import os
 import sys
 from datetime import datetime
 from ct_analyzer import CTAnalyzer
+from progress_logger import show_step, show_success, show_error, show_info, show_warning, get_log_file
 
 def main():
     """Main application entry point"""
     print("=== CT Reader - Advanced Medical Image Analysis ===")
-    print("Инициализация системы анализа КТ-снимков...")
+    show_step("Инициализация системы анализа КТ-снимков")
     
     # Check if input directory exists and has DICOM files
     input_dir = "input"
     if not os.path.exists(input_dir):
-        print(f"Ошибка: Директория {input_dir} не найдена!")
-        print("Создайте директорию 'input' и поместите в неё DICOM-файлы")
+        show_error(f"Директория {input_dir} не найдена!")
+        show_info("Создайте директорию 'input' и поместите в неё DICOM-файлы")
         return
     
     # Count DICOM files
@@ -29,11 +30,11 @@ def main():
                 dicom_files.append(os.path.join(root, file))
     
     if not dicom_files:
-        print(f"Ошибка: DICOM-файлы не найдены в директории {input_dir}")
-        print("Поместите DICOM-файлы в директорию 'input'")
+        show_error(f"DICOM-файлы не найдены в директории {input_dir}")
+        show_info("Поместите DICOM-файлы в директорию 'input'")
         return
     
-    print(f"Найдено {len(dicom_files)} DICOM-файлов")
+    show_success(f"Найдено {len(dicom_files)} DICOM-файлов")
     
     # Get additional context from user
     print("\n=== ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ===")
@@ -44,20 +45,21 @@ def main():
     try:
         user_context = input("\nВведите дополнительную информацию: ").strip()
         if user_context:
-            print(f"✅ Контекст добавлен: {user_context[:100]}{'...' if len(user_context) > 100 else ''}")
+            show_success(f"Контекст добавлен: {user_context[:100]}{'...' if len(user_context) > 100 else ''}")
         else:
             user_context = ""
-            print("⚪ Анализ без дополнительного контекста")
+            show_info("Анализ без дополнительного контекста")
     except KeyboardInterrupt:
-        print("\nОтмена операции")
+        show_warning("Отмена операции")
         return
     
     # Initialize analyzer
     try:
+        show_step("Инициализация анализатора")
         analyzer = CTAnalyzer()
-        print("✅ Анализатор инициализирован (модели загружаются по требованию)")
+        show_success("Анализатор инициализирован (модели загружаются по требованию)")
     except Exception as e:
-        print(f"Ошибка инициализации анализатора: {e}")
+        show_error(f"Ошибка инициализации анализатора: {e}")
         return
     
     # Analysis mode selection
@@ -71,9 +73,9 @@ def main():
             choice = input("\nВыберите режим анализа (1-3): ").strip()
             if choice in ['1', '2', '3']:
                 break
-            print("Пожалуйста, введите 1, 2 или 3")
+            show_warning("Пожалуйста, введите 1, 2 или 3")
         except KeyboardInterrupt:
-            print("\nОтмена операции")
+            show_warning("Отмена операции")
             return
     
     # Map choice to analysis mode
@@ -84,26 +86,34 @@ def main():
     }
     
     analysis_mode = mode_map[choice]
-    print(f"\nВыбран режим: {analysis_mode}")
+    show_success(f"Выбран режим: {analysis_mode}")
+    
+    # Show logging info
+    log_file = get_log_file()
+    show_info(f"Детальные логи сохраняются в: {log_file}")
     
     # Run analysis
     try:
-        print("Запуск анализа...")
+        show_step("Запуск анализа")
         result = analyzer.analyze_directory(input_dir, mode=analysis_mode, user_context=user_context)
         
         if result:
-            print("\n=== АНАЛИЗ ЗАВЕРШЁН ===")
+            show_success("Анализ завершён успешно!")
+            print("\n=== РЕЗУЛЬТАТЫ АНАЛИЗА ===")
             print("Результаты отображены выше")
             
             # Show context info if provided
             if user_context:
-                print(f"\n📋 Использованный контекст: {user_context}")
+                show_info(f"Использованный контекст: {user_context}")
+                
+            # Show log file location
+            show_info(f"Полные логи сохранены в: {log_file}")
                 
         else:
-            print("Анализ завершился без результатов")
+            show_warning("Анализ завершился без результатов")
             
     except Exception as e:
-        print(f"Ошибка во время анализа: {e}")
+        show_error(f"Ошибка во время анализа: {e}")
         import traceback
         traceback.print_exc()
 

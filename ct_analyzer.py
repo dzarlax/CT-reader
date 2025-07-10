@@ -16,13 +16,19 @@ from config import Config
 from image_processor import ImageProcessor
 from med42_client import Med42Client
 from comprehensive_analyzer import ComprehensiveAnalyzer
+from progress_logger import (
+    show_step, show_success, show_error, show_info, show_warning, 
+    log_to_file, suppress_prints
+)
 
 # MedGemma integration
 try:
     from medgemma_analyzer import MedGemmaAnalyzer
     MEDGEMMA_ANALYZER_AVAILABLE = True
+    log_to_file("MedGemma analyzer available")
 except ImportError:
     MEDGEMMA_ANALYZER_AVAILABLE = False
+    log_to_file("MedGemma analyzer not available", "WARNING")
 
 import config
 
@@ -42,30 +48,33 @@ class CTAnalyzer:
         
     def setup_logging(self):
         """Setup logging configuration"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        self.logger = logging.getLogger(__name__)
-        
         # Create output directory
         self.output_dir = "output"
         os.makedirs(self.output_dir, exist_ok=True)
-    
+        log_to_file(f"Output directory created: {self.output_dir}")
+        
     @property
     def med42_client(self):
         """Lazy load Med42 client"""
         if self._med42_client is None:
-            print("🔄 Инициализация Med42 клиента...")
-            self._med42_client = Med42Client()
+            show_step("Инициализация Med42 клиента")
+            log_to_file("Initializing Med42 client")
+            with suppress_prints():
+                self._med42_client = Med42Client()
+            show_success("Med42 клиент инициализирован")
+            log_to_file("Med42 client initialized successfully")
         return self._med42_client
         
     @property
     def comprehensive_analyzer(self):
         """Lazy load Comprehensive analyzer"""
         if self._comprehensive_analyzer is None:
-            print("🔄 Инициализация Comprehensive анализатора...")
-            self._comprehensive_analyzer = ComprehensiveAnalyzer()
+            show_step("Инициализация Comprehensive анализатора")
+            log_to_file("Initializing Comprehensive analyzer")
+            with suppress_prints():
+                self._comprehensive_analyzer = ComprehensiveAnalyzer()
+            show_success("Comprehensive анализатор инициализирован")
+            log_to_file("Comprehensive analyzer initialized successfully")
         return self._comprehensive_analyzer
         
     @property
@@ -73,10 +82,15 @@ class CTAnalyzer:
         """Lazy load MedGemma analyzer"""
         if self._medgemma_analyzer is None:
             if MEDGEMMA_ANALYZER_AVAILABLE:
-                print("🔄 Инициализация MedGemma анализатора...")
-                self._medgemma_analyzer = MedGemmaAnalyzer()
+                show_step("Инициализация MedGemma анализатора")
+                log_to_file("Initializing MedGemma analyzer")
+                with suppress_prints():
+                    self._medgemma_analyzer = MedGemmaAnalyzer()
+                show_success("MedGemma анализатор инициализирован")
+                log_to_file("MedGemma analyzer initialized successfully")
             else:
-                print("❌ MedGemma анализатор недоступен")
+                show_error("MedGemma анализатор недоступен")
+                log_to_file("MedGemma analyzer not available", "ERROR")
                 return None
         return self._medgemma_analyzer
     
@@ -93,27 +107,37 @@ class CTAnalyzer:
             Analysis results dictionary
         """
         if not os.path.exists(input_path):
-            print(f"❌ Директория не найдена: {input_path}")
+            show_error(f"Директория не найдена: {input_path}")
+            log_to_file(f"Directory not found: {input_path}", "ERROR")
             return None
             
         # Process images
-        images = self.image_processor.load_dicom_series(input_path)
+        show_step("Загрузка DICOM изображений")
+        log_to_file(f"Loading DICOM images from: {input_path}")
+        
+        with suppress_prints():
+            images = self.image_processor.load_dicom_series(input_path)
+            
         if not images:
-            print(f"❌ Не найдены DICOM файлы в: {input_path}")
+            show_error(f"Не найдены DICOM файлы в: {input_path}")
+            log_to_file(f"No DICOM files found in: {input_path}", "ERROR")
             return None
             
-        print(f"📊 Найдено {len(images)} DICOM изображений")
+        show_success(f"Найдено {len(images)} DICOM изображений")
+        log_to_file(f"Found {len(images)} DICOM images")
         
         # Show context info
         if user_context:
-            print(f"📋 Дополнительный контекст: {user_context}")
+            show_info(f"Дополнительный контекст: {user_context}")
+            log_to_file(f"User context: {user_context}")
         
         # Analyze using selected mode
         try:
             if mode == "medgemma":
                 analyzer = self.medgemma_analyzer
                 if not analyzer:
-                    print("❌ MedGemma анализатор недоступен")
+                    show_error("MedGemma анализатор недоступен")
+                    log_to_file("MedGemma analyzer not available", "ERROR")
                     return None
                 return analyzer.analyze_study(images, user_context)
                 
@@ -124,11 +148,13 @@ class CTAnalyzer:
                 return self.comprehensive_analyzer.analyze_study(images, user_context)
                 
             else:
-                print(f"❌ Неизвестный режим: {mode}")
+                show_error(f"Неизвестный режим: {mode}")
+                log_to_file(f"Unknown mode: {mode}", "ERROR")
                 return None
                 
         except Exception as e:
-            print(f"❌ Ошибка анализа: {e}")
+            show_error(f"Ошибка анализа: {e}")
+            log_to_file(f"Analysis error: {e}", "ERROR")
             return None
     
     def get_available_modes(self) -> List[str]:
@@ -137,7 +163,8 @@ class CTAnalyzer:
         
         # Добавляем MedGemma если доступна (она должна быть основным режимом)
         if not MEDGEMMA_ANALYZER_AVAILABLE:
-            print("⚠️ MedGemma недоступна, используйте med42 или comprehensive")
+            show_warning("MedGemma недоступна, используйте med42 или comprehensive")
+            log_to_file("MedGemma not available, using med42 or comprehensive", "WARNING")
             
         return modes
         
