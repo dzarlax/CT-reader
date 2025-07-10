@@ -196,6 +196,14 @@ class MedGemmaAnalyzer:
         show_step(f"Анализ {total_images} изображений в батчах по {self.batch_size}")
         log_to_file(f"Analyzing {total_images} images in batches of {self.batch_size}")
         
+        # Create session for intermediate saves
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_dir = os.path.join("output", f"session_{session_id}")
+        os.makedirs(session_dir, exist_ok=True)
+        
+        show_info(f"📁 Сессия: {session_id}")
+        show_info(f"💾 Промежуточные результаты: {session_dir}")
+        
         all_analyses = []
         
         try:
@@ -213,6 +221,9 @@ class MedGemmaAnalyzer:
                 batch_analyses = self._process_batch(batch_images, user_context, batch_start)
                 all_analyses.extend(batch_analyses)
                 
+                # Save intermediate results after each batch
+                self._save_intermediate_results(session_dir, batch_num, total_batches, all_analyses, user_context)
+                
                 # Memory cleanup after each batch
                 self._cleanup_memory()
                 
@@ -226,7 +237,12 @@ class MedGemmaAnalyzer:
             # Create final comprehensive report
             if all_analyses:
                 final_report = self._create_comprehensive_report(all_analyses, user_context, total_images)
+                
+                # Save final session summary
+                self._save_final_session_summary(session_dir, session_id, total_images, len(all_analyses))
+                
                 show_success(f"🎉 Анализ завершён! Обработано {len(all_analyses)} изображений")
+                show_info(f"📁 Все результаты сохранены в: {session_dir}")
                 return final_report
             else:
                 show_warning("Не удалось получить анализ ни одного изображения")
@@ -235,6 +251,10 @@ class MedGemmaAnalyzer:
         except Exception as e:
             show_error(f"Ошибка пакетного анализа: {e}")
             log_to_file(f"Batch analysis error: {e}", "ERROR")
+            
+            # Save error state
+            self._save_error_state(session_dir, str(e), len(all_analyses), total_images)
+            
             self._cleanup_memory()
             return None
     
@@ -388,9 +408,11 @@ Focus on diagnostic and therapeutic implications."""
         Returns:
             Comprehensive medical report
         """
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         report = f"""=== ПОЛНЫЙ MEDGEMMA АНАЛИЗ CT ИССЛЕДОВАНИЯ ===
 
-ДАТА АНАЛИЗА: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+ДАТА АНАЛИЗА: {timestamp}
 ОБЩАЯ ИНФОРМАЦИЯ:
 - Всего изображений обработано: {len(analyses)} из {total_images}
 - Дополнительный контекст: {user_context if user_context else "Не предоставлен"}
@@ -415,7 +437,168 @@ Focus on diagnostic and therapeutic implications."""
 
 === КОНЕЦ АНАЛИЗА ==="""
         
+        # Save report to file
+        self._save_report_to_file(report, total_images, timestamp)
+        
         return report
+    
+    def _save_intermediate_results(self, session_dir: str, batch_num: int, total_batches: int, 
+                                 analyses: List[str], user_context: str):
+        """
+        Save intermediate results after each batch
+        
+        Args:
+            session_dir: Session directory path
+            batch_num: Current batch number
+            total_batches: Total number of batches
+            analyses: All analyses so far
+            user_context: User context
+        """
+        try:
+            # Save current progress
+            progress_file = os.path.join(session_dir, "progress.json")
+            progress_data = {
+                "timestamp": datetime.now().isoformat(),
+                "batch_num": batch_num,
+                "total_batches": total_batches,
+                "images_processed": len(analyses),
+                "user_context": user_context,
+                "status": "in_progress"
+            }
+            
+            import json
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress_data, f, ensure_ascii=False, indent=2)
+            
+            # Save analyses so far
+            analyses_file = os.path.join(session_dir, f"analyses_batch_{batch_num:03d}.txt")
+            with open(analyses_file, 'w', encoding='utf-8') as f:
+                f.write(f"=== ПРОМЕЖУТОЧНЫЕ РЕЗУЛЬТАТЫ (Батч {batch_num}/{total_batches}) ===\n\n")
+                f.write(f"Обработано изображений: {len(analyses)}\n")
+                f.write(f"Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write("\n".join(analyses))
+            
+            # Show progress
+            if batch_num % 10 == 0 or batch_num == total_batches:  # Show every 10th batch or last
+                show_info(f"💾 Промежуточные результаты сохранены (батч {batch_num}/{total_batches})")
+                
+        except Exception as e:
+            show_warning(f"Ошибка сохранения промежуточных результатов: {e}")
+            log_to_file(f"Error saving intermediate results: {e}", "WARNING")
+    
+    def _save_final_session_summary(self, session_dir: str, session_id: str, total_images: int, processed_images: int):
+        """
+        Save final session summary
+        
+        Args:
+            session_dir: Session directory path
+            session_id: Session ID
+            total_images: Total number of images
+            processed_images: Number of successfully processed images
+        """
+        try:
+            summary_file = os.path.join(session_dir, "session_summary.json")
+            summary_data = {
+                "session_id": session_id,
+                "start_time": session_id,  # Encoded in session_id
+                "end_time": datetime.now().isoformat(),
+                "total_images": total_images,
+                "processed_images": processed_images,
+                "success_rate": (processed_images / total_images * 100) if total_images > 0 else 0,
+                "analyzer": "MedGemma 4B",
+                "batch_size": self.batch_size,
+                "status": "completed"
+            }
+            
+            import json
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary_data, f, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            log_to_file(f"Error saving session summary: {e}", "WARNING")
+    
+    def _save_error_state(self, session_dir: str, error_msg: str, processed_images: int, total_images: int):
+        """
+        Save error state for debugging
+        
+        Args:
+            session_dir: Session directory path
+            error_msg: Error message
+            processed_images: Number of images processed before error
+            total_images: Total number of images
+        """
+        try:
+            error_file = os.path.join(session_dir, "error_state.json")
+            error_data = {
+                "timestamp": datetime.now().isoformat(),
+                "error_message": error_msg,
+                "processed_images": processed_images,
+                "total_images": total_images,
+                "status": "error"
+            }
+            
+            import json
+            with open(error_file, 'w', encoding='utf-8') as f:
+                json.dump(error_data, f, ensure_ascii=False, indent=2)
+                
+            show_warning(f"💾 Состояние ошибки сохранено: {error_file}")
+                
+        except Exception as e:
+            log_to_file(f"Error saving error state: {e}", "WARNING")
+    
+    def _save_report_to_file(self, report: str, total_images: int, timestamp: str):
+        """
+        Save analysis report to file
+        
+        Args:
+            report: Complete analysis report
+            total_images: Number of images processed
+            timestamp: Analysis timestamp
+        """
+        try:
+            # Create output directory
+            output_dir = "output"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Create filename with timestamp
+            safe_timestamp = timestamp.replace(':', '-').replace(' ', '_')
+            filename = f"medgemma_analysis_{safe_timestamp}_{total_images}images.txt"
+            filepath = os.path.join(output_dir, filename)
+            
+            # Save report
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(report)
+            
+            show_success(f"📄 Отчёт сохранён: {filepath}")
+            log_to_file(f"Analysis report saved to: {filepath}")
+            
+            # Also save as JSON for programmatic access
+            json_filename = f"medgemma_analysis_{safe_timestamp}_{total_images}images.json"
+            json_filepath = os.path.join(output_dir, json_filename)
+            
+            analysis_data = {
+                "timestamp": timestamp,
+                "total_images": total_images,
+                "analyzer": "MedGemma 4B",
+                "report": report,
+                "metadata": {
+                    "processed_images": total_images,
+                    "batch_size": self.batch_size,
+                    "model_name": self.model_name,
+                    "device": self.device
+                }
+            }
+            
+            import json
+            with open(json_filepath, 'w', encoding='utf-8') as f:
+                json.dump(analysis_data, f, ensure_ascii=False, indent=2)
+            
+            show_success(f"📊 Данные сохранены: {json_filepath}")
+            log_to_file(f"Analysis data saved to: {json_filepath}")
+            
+        except Exception as e:
+            show_error(f"Ошибка сохранения отчёта: {e}")
+            log_to_file(f"Error saving report: {e}", "ERROR")
 
 
 def test_medgemma_analyzer():
