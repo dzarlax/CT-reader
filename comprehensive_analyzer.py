@@ -11,19 +11,42 @@ from typing import List, Dict, Any, Optional
 import base64
 from med42_client import Med42Client
 
+# Попробуем импортировать MedGemma, если доступна
+try:
+    from medgemma_client import MedGemmaClient
+    MEDGEMMA_AVAILABLE = True
+    print("✅ MedGemma клиент доступен")
+except ImportError as e:
+    MEDGEMMA_AVAILABLE = False
+    print(f"⚠️ MedGemma недоступна: {e}")
+
 
 class ComprehensiveAnalyzer:
     """Analyzer that processes ALL images with context preservation"""
     
     def __init__(self):
         self.base_url = "http://localhost:11434"
-        self.gemma_model = "gemma3:4b"  # Основная модель для анализа изображений
-        self.vision_model = "llama3.2-vision:latest"  # Резервная модель
+        self.gemma_model = "gemma3:4b"  # Резервная модель
+        self.vision_model = "llama3.2-vision:latest"  # Для анализа изображений
         
-        # Инициализируем Med42 для медицинского анализа
+        # Инициализируем MedGemma если доступна
+        if MEDGEMMA_AVAILABLE:
+            try:
+                self.medgemma_client = MedGemmaClient()
+                print("✅ MedGemma клиент инициализирован для специализированного медицинского анализа")
+                self.use_medgemma = True
+            except Exception as e:
+                print(f"⚠️ MedGemma недоступна: {e}")
+                self.medgemma_client = None
+                self.use_medgemma = False
+        else:
+            self.medgemma_client = None
+            self.use_medgemma = False
+        
+        # Инициализируем Med42 для дополнительного медицинского анализа
         try:
             self.med42_client = Med42Client()
-            print("✅ Med42 клиент инициализирован для медицинского анализа")
+            print("✅ Med42 клиент инициализирован для дополнительного медицинского анализа")
         except Exception as e:
             print(f"⚠️ Med42 недоступна: {e}")
             self.med42_client = None
@@ -187,28 +210,29 @@ class ComprehensiveAnalyzer:
     
     def _analyze_single_image_with_context(self, image_data: Dict[str, Any], 
                                          image_idx: int, previous_context: str) -> Optional[str]:
-        """Analyze single image with previous context using Gemma 3 + Med42"""
+        """Analyze single image with previous context using MedGemma + Med42"""
         
         try:
-            # ЭТАП 1: Анализ изображения с помощью Gemma 3
-            gemma_prompt = f"""Analyze this CT image #{image_idx} as an experienced radiologist.
+            # ЭТАП 1: Анализ изображения
+            # Сначала получаем визуальное описание от Vision модели
+            vision_prompt = f"""Analyze this CT image #{image_idx} as an experienced radiologist.
 
 PREVIOUS CONTEXT FROM STUDY:
 {previous_context if previous_context else "This is the first image in the study."}
 
-CURRENT IMAGE ANALYSIS:
+Provide detailed visual analysis:
 1. Anatomical identification and orientation
-2. Organ assessment (size, density, morphology)
+2. Organ assessment (size, density, morphology)  
 3. Pathological findings detection
 4. Relationship to previous findings
-5. Clinical significance
+5. Image quality and technical factors
 
-Provide detailed visual analysis of what you see in the image."""
+Focus on objective visual findings."""
             
-            # Gemma 3 analysis
+            # Vision analysis для получения визуального описания
             payload = {
-                "model": self.gemma_model,
-                "prompt": gemma_prompt,
+                "model": self.vision_model,
+                "prompt": vision_prompt,
                 "images": [image_data['base64_image']],
                 "stream": False,
                 "options": {
@@ -223,27 +247,59 @@ Provide detailed visual analysis of what you see in the image."""
                 return None
                 
             result = response.json()
-            gemma_analysis = result.get('response', '').strip()
+            vision_analysis = result.get('response', '').strip()
             
-            # Log Gemma response
+            # Log Vision response
             print("=" * 50)
-            print(f"🔍 ПОЛНЫЙ ОТВЕТ GEMMA 3 (Изображение {image_idx}):")
-            print(gemma_analysis)
+            print(f"🔍 ПОЛНЫЙ ОТВЕТ LLAMA VISION (Изображение {image_idx}):")
+            print(vision_analysis)
             print("=" * 50)
             
-            # ЭТАП 2: Медицинская интерпретация с помощью Med42 (если доступна)
-            if self.med42_client:
-                med42_prompt = f"""Based on the following CT image analysis, provide specialized medical interpretation:
+            # ЭТАП 2: Медицинская интерпретация с помощью MedGemma (если доступна)
+            medical_analysis = None
+            if self.use_medgemma and self.medgemma_client:
+                try:
+                    medgemma_prompt = f"""CT Image Analysis #{image_idx}
 
-GEMMA 3 ANALYSIS:
-{gemma_analysis}
+VISUAL FINDINGS:
+{vision_analysis}
 
 STUDY CONTEXT:
 {previous_context if previous_context else "First image in study"}
 
-MEDICAL INTERPRETATION REQUIRED:
+Please provide specialized medical interpretation focusing on clinical significance and diagnostic considerations."""
+                    
+                    medical_analysis = self.medgemma_client.analyze_radiology_finding(
+                        vision_analysis, 
+                        previous_context
+                    )
+                    
+                    if medical_analysis:
+                        print("=" * 50)
+                        print(f"🔍 ПОЛНЫЙ ОТВЕТ MEDGEMMA (Медицинская интерпретация {image_idx}):")
+                        print(medical_analysis)
+                        print("=" * 50)
+                        
+                except Exception as e:
+                    print(f"⚠️ Ошибка MedGemma анализа: {e}")
+                    medical_analysis = None
+            
+            # ЭТАП 3: Дополнительная медицинская интерпретация с помощью Med42 (если доступна)
+            med42_analysis = None
+            if self.med42_client:
+                med42_prompt = f"""Based on the following CT image analysis, provide additional medical interpretation:
+
+VISUAL ANALYSIS:
+{vision_analysis}
+
+{f"MEDGEMMA INTERPRETATION: {medical_analysis}" if medical_analysis else ""}
+
+STUDY CONTEXT:
+{previous_context if previous_context else "First image in study"}
+
+ADDITIONAL MEDICAL ANALYSIS REQUIRED:
 1. Clinical significance assessment
-2. Differential diagnosis considerations
+2. Differential diagnosis considerations  
 3. Pathological findings evaluation
 4. Recommendations for further evaluation
 5. Integration with previous study findings
@@ -253,28 +309,34 @@ Provide comprehensive medical interpretation with clinical terminology."""
                 try:
                     med42_analysis = self.med42_client._generate_analysis(med42_prompt)
                     
-                    # Log Med42 response
-                    print("=" * 50)
-                    print(f"🔍 ПОЛНЫЙ ОТВЕТ MED42 (Медицинская интерпретация {image_idx}):")
-                    print(med42_analysis)
-                    print("=" * 50)
-                    
-                    # Combine both analyses
-                    combined_analysis = f"""ВИЗУАЛЬНЫЙ АНАЛИЗ (Gemma 3):
-{gemma_analysis}
-
-МЕДИЦИНСКАЯ ИНТЕРПРЕТАЦИЯ (Med42):
-{med42_analysis}"""
-                    
-                    return combined_analysis
-                    
+                    if med42_analysis:
+                        # Log Med42 response
+                        print("=" * 50)
+                        print(f"🔍 ПОЛНЫЙ ОТВЕТ MED42 (Дополнительная интерпретация {image_idx}):")
+                        print(med42_analysis)
+                        print("=" * 50)
+                        
                 except Exception as e:
                     print(f"⚠️ Ошибка Med42 анализа: {e}")
-                    # Fallback to Gemma only
-                    return gemma_analysis
-            else:
-                # Med42 недоступна, используем только Gemma 3
-                return gemma_analysis
+                    med42_analysis = None
+            
+            # Объединяем все анализы
+            combined_analysis = f"""ВИЗУАЛЬНЫЙ АНАЛИЗ (Llama Vision):
+{vision_analysis}"""
+            
+            if medical_analysis:
+                combined_analysis += f"""
+
+МЕДИЦИНСКАЯ ИНТЕРПРЕТАЦИЯ (MedGemma):
+{medical_analysis}"""
+            
+            if med42_analysis:
+                combined_analysis += f"""
+
+ДОПОЛНИТЕЛЬНЫЙ МЕДИЦИНСКИЙ АНАЛИЗ (Med42):
+{med42_analysis}"""
+            
+            return combined_analysis
             
         except Exception as e:
             print(f"Ошибка анализа изображения {image_idx}: {e}")
