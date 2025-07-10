@@ -28,20 +28,15 @@ import config
 
 class CTAnalyzer:
     def __init__(self, config_path: str = "config.py"):
-        """Initialize CT Analyzer with simplified modes"""
+        """Initialize CT Analyzer with lazy loading"""
         self.config = Config()
         self.image_processor = ImageProcessor()
         
-        # Core analyzers
-        self.med42_client = Med42Client()
-        self.comprehensive_analyzer = ComprehensiveAnalyzer()
+        # Lazy loading - initialize analyzers only when needed
+        self._med42_client = None
+        self._comprehensive_analyzer = None
+        self._medgemma_analyzer = None
         
-        # MedGemma analyzer (primary mode)
-        if MEDGEMMA_ANALYZER_AVAILABLE:
-            self.medgemma_analyzer = MedGemmaAnalyzer()
-        else:
-            self.medgemma_analyzer = None
-            
         # Initialize logging
         self.setup_logging()
         
@@ -56,6 +51,34 @@ class CTAnalyzer:
         # Create output directory
         self.output_dir = "output"
         os.makedirs(self.output_dir, exist_ok=True)
+    
+    @property
+    def med42_client(self):
+        """Lazy load Med42 client"""
+        if self._med42_client is None:
+            print("🔄 Инициализация Med42 клиента...")
+            self._med42_client = Med42Client()
+        return self._med42_client
+        
+    @property
+    def comprehensive_analyzer(self):
+        """Lazy load Comprehensive analyzer"""
+        if self._comprehensive_analyzer is None:
+            print("🔄 Инициализация Comprehensive анализатора...")
+            self._comprehensive_analyzer = ComprehensiveAnalyzer()
+        return self._comprehensive_analyzer
+        
+    @property
+    def medgemma_analyzer(self):
+        """Lazy load MedGemma analyzer"""
+        if self._medgemma_analyzer is None:
+            if MEDGEMMA_ANALYZER_AVAILABLE:
+                print("🔄 Инициализация MedGemma анализатора...")
+                self._medgemma_analyzer = MedGemmaAnalyzer()
+            else:
+                print("❌ MedGemma анализатор недоступен")
+                return None
+        return self._medgemma_analyzer
     
     def analyze_directory(self, input_path: str, mode: str = "medgemma", user_context: str = "") -> Optional[Dict[str, Any]]:
         """
@@ -88,10 +111,11 @@ class CTAnalyzer:
         # Analyze using selected mode
         try:
             if mode == "medgemma":
-                if not self.medgemma_analyzer:
+                analyzer = self.medgemma_analyzer
+                if not analyzer:
                     print("❌ MedGemma анализатор недоступен")
                     return None
-                return self.medgemma_analyzer.analyze_study(images, user_context)
+                return analyzer.analyze_study(images, user_context)
                 
             elif mode == "med42":
                 return self.med42_client.analyze_ct_study(images, user_context)

@@ -55,7 +55,7 @@ def main():
     # Initialize analyzer
     try:
         analyzer = CTAnalyzer()
-        print("Анализатор инициализирован успешно")
+        print("✅ Анализатор инициализирован (модели загружаются по требованию)")
     except Exception as e:
         print(f"Ошибка инициализации анализатора: {e}")
         return
