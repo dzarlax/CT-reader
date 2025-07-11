@@ -81,9 +81,17 @@ class MedGemmaAnalyzer:
             show_error("Нет изображений для анализа")
             return None
         
+        # Skip first 5 service images (calibration/service data)
+        skip_first = 5  # Skip first 5 images (service/calibration data)
+        service_filtered_images = images[skip_first:] if len(images) > skip_first else images
+        
         # Determine how many images to process
-        total_images = len(images)
+        total_images = len(service_filtered_images)
         images_to_process = total_images if self.max_images_to_analyze is None else min(self.max_images_to_analyze, total_images)
+        
+        show_info(f"📊 Пропущено первые {skip_first} служебных изображений из {len(images)} общих")
+        if skip_first > 0:
+            show_info(f"🔍 Будут анализироваться изображения с #{skip_first+1} по #{skip_first+images_to_process}")
         
         show_step(f"Запуск MedGemma анализа ({images_to_process} из {total_images} изображений)")
         log_to_file(f"Starting MedGemma analysis with {images_to_process} out of {total_images} images")
@@ -93,7 +101,7 @@ class MedGemmaAnalyzer:
         
         try:
             # Process images in batches
-            result = self._analyze_all_images(images[:images_to_process], user_context)
+            result = self._analyze_all_images(service_filtered_images[:images_to_process], user_context)
             
             if result:
                 show_success(f"MedGemma анализ завершён успешно ({images_to_process} изображений)")
@@ -315,6 +323,19 @@ class MedGemmaAnalyzer:
                 image_bytes = base64.b64decode(image_data['base64_image'])
                 image = Image.open(BytesIO(image_bytes))
                 
+                # Ensure image is in RGB format
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                
+                # Log image info for debugging
+                print(f"[DEBUG] Изображение {image_index}: размер {image.size}, режим {image.mode}")
+                
+                # Resize if too large (MedGemma works better with smaller images)
+                max_size = 512
+                if max(image.size) > max_size:
+                    image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                    print(f"[DEBUG] Изображение уменьшено до {image.size}")
+                
                 # Create medical prompt
                 prompt = f"""Analyze this CT image #{image_index} from a medical study.
 
@@ -367,19 +388,30 @@ Focus on diagnostic and therapeutic implications."""
                         use_cache=True
                     )
                 
-                # Decode response
-                response = self.processor.decode(outputs[0], skip_special_tokens=True)
+                # Decode only the new tokens (generated part)
+                input_len = inputs["input_ids"].shape[-1]
+                generated_tokens = outputs[0][input_len:]
                 
-                # Extract generated part (remove input prompt)
-                generated_text = response.split("assistant")[-1].strip() if "assistant" in response else response.strip()
+                # Decode only the generated part
+                generated_text = self.processor.decode(generated_tokens, skip_special_tokens=True)
                 
-                if generated_text:
-                    return f"=== ИЗОБРАЖЕНИЕ {image_index} ===\n{generated_text}"
+                # Log the full response for debugging
+                print(f"=== ОТЛАДКА MEDGEMMA (Изображение {image_index}) ===")
+                print(f"Длина входных токенов: {input_len}")
+                print(f"Длина выходных токенов: {len(outputs[0])}")
+                print(f"Сгенерированный текст: {generated_text[:200]}...")
+                print("=" * 50)
+                
+                if generated_text and len(generated_text.strip()) > 10:
+                    return f"=== ИЗОБРАЖЕНИЕ {image_index} ===\n{generated_text.strip()}"
                 else:
                     return None
                 
         except Exception as e:
+            print(f"❌ ОШИБКА АНАЛИЗА ИЗОБРАЖЕНИЯ {image_index}: {e}")
             log_to_file(f"Single image analysis error for image {image_index}: {e}", "ERROR")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _cleanup_memory(self):
